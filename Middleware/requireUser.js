@@ -6,10 +6,7 @@ const requireUser = async (req, res, next) => {
     // 1. Read Authorization header
     const authHeader = req.headers.authorization;
 
-    if (
-      typeof authHeader !== "string" ||
-      !authHeader.startsWith("Bearer ")
-    ) {
+    if (typeof authHeader !== "string" || !authHeader.startsWith("Bearer ")) {
       return res.status(401).json({
         success: false,
         message: "Authentication token is required",
@@ -69,20 +66,36 @@ const requireUser = async (req, res, next) => {
     }
 
     // 6. Verify user still exists and is active
+    // const [users] = await pool.query(
+    //   `SELECT
+    //      user_id,
+    //      tenant_id,
+    //      login_id,
+    //      full_name,
+    //      referral_code,
+    //      sponsor_id,
+    //      status
+    //    FROM users
+    //    WHERE user_id = ?
+    //      AND tenant_id = ?
+    //    LIMIT 1`,
+    //   [decoded.userId, decoded.tenantId]
+    // );
+
     const [users] = await pool.query(
       `SELECT
-         user_id,
-         tenant_id,
-         login_id,
-         full_name,
-         referral_code,
-         sponsor_id,
-         status
-       FROM users
-       WHERE user_id = ?
-         AND tenant_id = ?
-       LIMIT 1`,
-      [decoded.userId, decoded.tenantId]
+     user_id,
+     tenant_id,
+     referral_code AS login_id,
+     full_name,
+     referral_code,
+     sponsor_id,
+     status
+   FROM users
+   WHERE user_id = ?
+     AND tenant_id = ?
+   LIMIT 1`,
+      [decoded.userId, decoded.tenantId],
     );
 
     if (users.length === 0) {

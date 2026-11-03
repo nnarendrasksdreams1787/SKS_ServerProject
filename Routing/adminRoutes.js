@@ -23,7 +23,7 @@ const {
 } = require("../Controller/adminProductsController");
 const { getReferrals, createReferral, getReferralTree } = require("../Controller/adminReferralsController");
 const { getNetwork } = require("../Controller/adminNetworkController");
-const { getWallets, getWalletTransactions } = require("../Controller/adminWalletController");
+const { getWallets, getWalletTransactions,  } = require("../Controller/adminWalletController");
 const { getWithdrawals, getPayoutBatches } = require("../Controller/adminPayoutController");
 const { getOrders, getOrderDetails } = require("../Controller/adminOrdersController");
 const { getPaymentGateways, updateProviderStatus, updateGatewayEnabled } = require("../Controller/adminPaymentGetwayController");
