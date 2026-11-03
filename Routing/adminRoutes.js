@@ -21,14 +21,40 @@ const {
   updateProductCategory,
   updateProductCategoryStatus,
 } = require("../Controller/adminProductsController");
-const { getReferrals, createReferral, getReferralTree } = require("../Controller/adminReferralsController");
+const {
+  getReferrals,
+  createReferral,
+  getReferralTree,
+} = require("../Controller/adminReferralsController");
 const { getNetwork } = require("../Controller/adminNetworkController");
-const { getWallets, getWalletTransactions,  } = require("../Controller/adminWalletController");
-const { getWithdrawals, getPayoutBatches } = require("../Controller/adminPayoutController");
-const { getOrders, getOrderDetails } = require("../Controller/adminOrdersController");
-const { getPaymentGateways, updateProviderStatus, updateGatewayEnabled } = require("../Controller/adminPaymentGetwayController");
-const { getBankDetails, updateBankVerification } = require("../Controller/adminBankDetailsController");
-const { requestAdminReset, resetAdminPassword } = require("../Controller/passwordResetController");
+const {
+  getWallets,
+  getWalletTransactions,
+} = require("../Controller/adminWalletController");
+const {
+  getWithdrawals,
+  getPayoutBatches,
+} = require("../Controller/adminPayoutController");
+const {
+  getOrders,
+  getOrderDetails,
+} = require("../Controller/adminOrdersController");
+const {
+  getPaymentGateways,
+  updateProviderStatus,
+  updateGatewayEnabled,
+  getSelectedGateway,
+  updateSelectedGateway,
+} = require("../Controller/adminPaymentGetwayController");
+const {
+  getBankDetails,
+  updateBankVerification,
+} = require("../Controller/adminBankDetailsController");
+const {
+  requestAdminReset,
+  resetAdminPassword,
+} = require("../Controller/passwordResetController");
+// const { getSelectedGateway } = require("../Services/paymentRepository");
 
 adminRoute.post("/setup", setupFirstAdmin);
 adminRoute.post("/login", login);
@@ -38,47 +64,64 @@ adminRoute.post("/logout", requireAdmin, logout);
 adminRoute.post("/forgot-password", requestAdminReset);
 adminRoute.post("/reset-password", resetAdminPassword);
 
-
 adminRoute.get("/dashboard", requireAdmin, getDashboardStats);
 
 adminRoute.get("/products", requireAdmin, getProducts);
-adminRoute.post("/products", requireAdmin, uploadEbook, createProduct)
+adminRoute.post("/products", requireAdmin, uploadEbook, createProduct);
 adminRoute.put("/products/:id", requireAdmin, uploadEbook, updateProduct);
-adminRoute.patch("/products/:id/status", requireAdmin, updateProductStatus)
-adminRoute.delete("/products/:id", requireAdmin, deleteProduct)
+adminRoute.patch("/products/:id/status", requireAdmin, updateProductStatus);
+adminRoute.delete("/products/:id", requireAdmin, deleteProduct);
 
 adminRoute.get("/categories", requireAdmin, getProductCategories);
-adminRoute.post("/categories", requireAdmin, createProductCategory)
+adminRoute.post("/categories", requireAdmin, createProductCategory);
 adminRoute.put("/categories/:id", requireAdmin, updateProductCategory);
-adminRoute.patch("/categories/:id/status", requireAdmin, updateProductCategoryStatus)
-
+adminRoute.patch(
+  "/categories/:id/status",
+  requireAdmin,
+  updateProductCategoryStatus,
+);
 
 // adminRoute.get("/referrals", requireAdmin, getReferrals);
 // adminRoute.post("/referrals", requireAdmin, createReferral)
 
-adminRoute.get("/referrals", requireAdmin, getReferrals)
-adminRoute.get("/referral-tree/:userId", requireAdmin, getReferralTree)
-adminRoute.post("/referrals/leads", requireAdmin, createReferral)
-
+adminRoute.get("/referrals", requireAdmin, getReferrals);
+adminRoute.get("/referral-tree/:userId", requireAdmin, getReferralTree);
+adminRoute.post("/referrals/leads", requireAdmin, createReferral);
 
 adminRoute.get("/network", requireAdmin, getNetwork);
 
 adminRoute.get("/wallets", requireAdmin, getWallets);
-adminRoute.get("/wallet-transactions", requireAdmin, getWalletTransactions)
+adminRoute.get("/wallet-transactions", requireAdmin, getWalletTransactions);
 
 adminRoute.get("/withdrawals", requireAdmin, getWithdrawals);
 adminRoute.get("/payout-batches", requireAdmin, getPayoutBatches);
 
-
 adminRoute.get("/orders", requireAdmin, getOrders);
 adminRoute.get("/orders/:id", requireAdmin, getOrderDetails);
 
-adminRoute.get("/payment-gateways", requireAdmin, getPaymentGateways)
-adminRoute.patch("/payment-gateways/:providerId/status", requireAdmin, updateProviderStatus);
-adminRoute.patch("/payment-gateways/:providerId/enabled", requireAdmin, updateGatewayEnabled)
-
+adminRoute.get("/payment-gateways", requireAdmin, getPaymentGateways);
+adminRoute.patch(
+  "/payment-gateways/:providerId/status",
+  requireAdmin,
+  updateProviderStatus,
+);
+adminRoute.patch(
+  "/payment-gateways/:providerId/enabled",
+  requireAdmin,
+  updateGatewayEnabled,
+);
+adminRoute.get("/payment-gateways/selected", requireAdmin, getSelectedGateway);
+adminRoute.patch(
+  "/payment-gateways/selected",
+  requireAdmin,
+  updateSelectedGateway,
+);
 
 adminRoute.get("/bank-details", requireAdmin, getBankDetails);
-adminRoute.patch("/bank-details/:id/verification", requireAdmin, updateBankVerification);
+adminRoute.patch(
+  "/bank-details/:id/verification",
+  requireAdmin,
+  updateBankVerification,
+);
 
 module.exports = adminRoute;

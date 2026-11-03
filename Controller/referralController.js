@@ -61,7 +61,7 @@ const getDirectReferrals = async (req, res) => {
         user_id,
         login_id,
         full_name,
-        referral_code,
+        referral_code AS login_id,
         status,
         created_at
       FROM users

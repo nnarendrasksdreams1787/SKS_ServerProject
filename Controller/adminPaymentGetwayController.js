@@ -1,5 +1,9 @@
-
 const pool = require("../DB/db");
+
+const {
+  getSelectedPaymentGateway,
+  updateSelectedPaymentGateway,
+} = require("../Services/paymentServices");
 
 const TENANT_ID = 1;
 
@@ -32,7 +36,7 @@ exports.getPaymentGateways = async (req, res) => {
         AND c.tenant_id = p.tenant_id
        WHERE p.tenant_id = ?
        ORDER BY p.provider_id ASC, c.environment ASC`,
-      [TENANT_ID]
+      [TENANT_ID],
     );
 
     const [summaryRows] = await pool.execute(
@@ -56,7 +60,7 @@ exports.getPaymentGateways = async (req, res) => {
          ON c.provider_id = p.provider_id
         AND c.tenant_id = p.tenant_id
        WHERE p.tenant_id = ?`,
-      [TENANT_ID]
+      [TENANT_ID],
     );
 
     const summary = summaryRows[0];
@@ -85,13 +89,7 @@ exports.getPaymentGateways = async (req, res) => {
   }
 };
 
-
-
-const ALLOWED_PROVIDER_STATUSES = [
-  "active",
-  "inactive",
-  "maintenance",
-];
+const ALLOWED_PROVIDER_STATUSES = ["active", "inactive", "maintenance"];
 
 // PATCH /api/admin/payment-gateways/:providerId/status
 exports.updateProviderStatus = async (req, res) => {
@@ -115,7 +113,7 @@ exports.updateProviderStatus = async (req, res) => {
       `UPDATE payment_gateway_providers
        SET status = ?
        WHERE tenant_id = ? AND provider_id = ?`,
-      [status, TENANT_ID, providerId]
+      [status, TENANT_ID, providerId],
     );
 
     if (result.affectedRows === 0) {
@@ -123,7 +121,7 @@ exports.updateProviderStatus = async (req, res) => {
         `SELECT provider_id, status
          FROM payment_gateway_providers
          WHERE tenant_id = ? AND provider_id = ?`,
-        [TENANT_ID, providerId]
+        [TENANT_ID, providerId],
       );
 
       if (!rows.length) {
@@ -137,7 +135,7 @@ exports.updateProviderStatus = async (req, res) => {
       `SELECT provider_id, provider_code, provider_name, status
        FROM payment_gateway_providers
        WHERE tenant_id = ? AND provider_id = ?`,
-      [TENANT_ID, providerId]
+      [TENANT_ID, providerId],
     );
 
     return res.json({
@@ -181,7 +179,7 @@ exports.updateGatewayEnabled = async (req, res) => {
       `SELECT provider_id, provider_code, status
        FROM payment_gateway_providers
        WHERE tenant_id = ? AND provider_id = ?`,
-      [TENANT_ID, providerId]
+      [TENANT_ID, providerId],
     );
 
     if (!providers.length) {
@@ -211,7 +209,7 @@ exports.updateGatewayEnabled = async (req, res) => {
       `SELECT gateway_config_id
        FROM payment_gateway_configs
        WHERE tenant_id = ? AND provider_id = ? AND environment = ?`,
-      [TENANT_ID, providerId, environment]
+      [TENANT_ID, providerId, environment],
     );
 
     if (!existing.length) {
@@ -228,7 +226,7 @@ exports.updateGatewayEnabled = async (req, res) => {
         `INSERT INTO payment_gateway_configs
           (tenant_id, provider_id, environment, is_enabled)
          VALUES (?, ?, ?, 1)`,
-        [TENANT_ID, providerId, environment]
+        [TENANT_ID, providerId, environment],
       );
     } else {
       await pool.execute(
@@ -236,7 +234,7 @@ exports.updateGatewayEnabled = async (req, res) => {
          SET is_enabled = ?
          WHERE tenant_id = ? AND provider_id = ?
            AND environment = ?`,
-        [enabled ? 1 : 0, TENANT_ID, providerId, environment]
+        [enabled ? 1 : 0, TENANT_ID, providerId, environment],
       );
     }
 
@@ -251,6 +249,127 @@ exports.updateGatewayEnabled = async (req, res) => {
 
     return res.status(500).json({
       message: "Unable to update payment configuration status.",
+    });
+  }
+};
+
+// GET /api/admin/payment-getways/seleced
+
+// exports.getSelectedGateway = async (req, res) => {
+//   try {
+
+//     const environment = req.query.environment || "test";
+
+//     const seleced = await getSelectedPaymentGateway(environment);
+
+//     return res.status(200).json({
+//       success: true,
+//       selectedGetway: seleced,
+//     })
+//   } catch (error) {
+//     console.error("Get selected getway error: ", error.message);
+
+//     return res.status(500).json({
+//       success: false,
+//       message: "Unable to retrieve selected geteway",
+//     })
+//   }
+// }
+
+// GET /api/admin/payment-gateways/selected
+
+exports.getSelectedGateway = async (req, res) => {
+  try {
+    const environment = req.query.environment || "test";
+
+    if (!["test", "live"].includes(environment)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid payment environment",
+      });
+    }
+
+    const selected = await getSelectedPaymentGateway(environment);
+
+    return res.status(200).json({
+      success: true,
+      selectedGateway: selected,
+    });
+  } catch (error) {
+    console.error("Get selected gateway error:", error.message);
+
+    return res.status(500).json({
+      success: false,
+      message: "Unable to retrieve selected gateway",
+    });
+  }
+};
+
+// PATHC /api/admin/payment-getways/selected
+
+// exports.updateSelectedGateway = async (req, res) => {
+//   try {
+//     const { providerCode, environment = "test" } = req.body;
+
+//     if (!["phonepe", "mswipe"].includes(providerCode)) {
+//       return res.status(400).json({
+//         success: false,
+//         message: "Selected phonepe or mswipe",
+//       });
+//     }
+
+//     if (!["test", "live"].includes(environment)) {
+//       return res.status(400).json({
+//         success: false,
+//         message: "Invalid payment environment",
+//       });
+//     }
+
+//     const result = await updateSelectedPaymentGetway(providerCode, environment);
+
+//     return res.status(200).json(result);
+//   } catch (error) {
+//     console.error("Update selected getways error: ", error.message);
+
+//     return res.status(409).json({
+//       success: false,
+//       message: "Update to select payment geteway",
+//     });
+//   }
+// };
+
+// PATCH /api/admin/payment-gateways/selected
+
+exports.updateSelectedGateway = async (req, res) => {
+  try {
+    const { providerCode, environment = "test" } = req.body;
+
+    if (!["phonepe", "mswipe"].includes(providerCode)) {
+      return res.status(400).json({
+        success: false,
+        message: "Select phonepe or mswipe",
+      });
+    }
+
+    if (!["test", "live"].includes(environment)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid payment environment",
+      });
+    }
+
+    const result = await updateSelectedPaymentGateway(
+      providerCode,
+      environment,
+    );
+
+    return res.status(200).json(result);
+  } catch (error) {
+    console.error("Update selected gateway error:", error.message);
+
+    return res.status(409).json({
+      success: false,
+      message: "Unable to select payment gateway",
     });
   }
 };

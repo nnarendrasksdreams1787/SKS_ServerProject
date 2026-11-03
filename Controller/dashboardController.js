@@ -7,12 +7,24 @@ const getDashboard = async (req, res) => {
     const { userId, tenantId } = req.user;
 
     // 1. Get user information
+    // const [users] = await pool.query(
+    //   `SELECT user_id, login_id, full_name, referral_code
+    //    FROM users
+    //    WHERE user_id = ? AND tenant_id = ?
+    //    LIMIT 1`,
+    //   [userId, tenantId]
+    // );
     const [users] = await pool.query(
-      `SELECT user_id, login_id, full_name, referral_code
-       FROM users
-       WHERE user_id = ? AND tenant_id = ?
-       LIMIT 1`,
-      [userId, tenantId]
+      `SELECT
+            user_id,
+            referral_code AS login_id,
+            full_name,
+            referral_code
+        FROM users
+        WHERE user_id = ?
+          AND tenant_id = ?
+        LIMIT 1`,
+      [userId, tenantId],
     );
 
     if (users.length === 0) {
@@ -28,26 +40,23 @@ const getDashboard = async (req, res) => {
        FROM wallets
        WHERE user_id = ? AND tenant_id = ?
        LIMIT 1`,
-      [userId, tenantId]
+      [userId, tenantId],
     );
 
     const totalAmount = wallets.length
       ? Number(wallets[0].available_balance)
       : 0;
 
- 
-// Count users directly sponsored by the logged-in user.
-     const [referrals] = await pool.query(
-       `SELECT COUNT(*) AS total_referrals
+    // Count users directly sponsored by the logged-in user.
+    const [referrals] = await pool.query(
+      `SELECT COUNT(*) AS total_referrals
         FROM users
         WHERE sponsor_id = ?
         AND tenant_id = ?`,
-     [userId, tenantId]
+      [userId, tenantId],
     );
 
-    const totalReferrals = Number(
-      referrals[0].total_referrals
-    );
+    const totalReferrals = Number(referrals[0].total_referrals);
     // 4. Approved commission only
     const [commissions] = await pool.query(
       `SELECT COALESCE(SUM(amount), 0) AS total_commission
@@ -55,12 +64,10 @@ const getDashboard = async (req, res) => {
        WHERE beneficiary_id = ?
        AND tenant_id = ?
        AND status = 'approved'`,
-    [userId, tenantId]
+      [userId, tenantId],
     );
 
-    const totalCommission = Number(
-      commissions[0].total_commission
-    );
+    const totalCommission = Number(commissions[0].total_commission);
 
     // 5. Paid orders only
     const [orders] = await pool.query(
@@ -69,12 +76,10 @@ const getDashboard = async (req, res) => {
        WHERE user_id = ?
          AND tenant_id = ?
          AND status = 'paid'`,
-      [userId, tenantId]
+      [userId, tenantId],
     );
 
-    const totalOrders = Number(
-      orders[0].total_orders
-    );
+    const totalOrders = Number(orders[0].total_orders);
 
     // 6. Bank account status
     const [bankAccounts] = await pool.query(
@@ -89,7 +94,7 @@ const getDashboard = async (req, res) => {
          AND tenant_id = ?
        ORDER BY is_primary DESC, created_at DESC
        LIMIT 1`,
-      [userId, tenantId]
+      [userId, tenantId],
     );
 
     const bankAdded = bankAccounts.length > 0;
@@ -115,9 +120,7 @@ const getDashboard = async (req, res) => {
 
       bank: {
         is_added: bankAdded,
-        is_verified: bankAdded
-          ? Boolean(bankAccounts[0].is_verified)
-          : false,
+        is_verified: bankAdded ? Boolean(bankAccounts[0].is_verified) : false,
       },
     });
   } catch (error) {
