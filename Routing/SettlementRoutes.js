@@ -22,7 +22,7 @@ settleRoutes.get(
   getSettlement
 );
 
-router.post(
+settleRoutes.post(
   "/:paymentOrderId/prepare",
   requireAdmin,
   prepareSettlement

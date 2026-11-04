@@ -128,6 +128,22 @@ const phonepeService = {
       throw error;
     }
 
+    const configuredEnvironment = process.env.PHONEPE_ENVIRONMENT;
+
+    if (!["sandbox", "production"].includes(configuredEnvironment)) {
+      const error = new Error("Invalid PhonePe environment configuration");
+      error.statusCode = 503;
+      throw error;
+    }
+
+    if (configuredEnvironment !== "sandbox") {
+      const error = new Error(
+        "Production PhonePe payments are not enabled yet",
+      );
+      error.statusCode = 503;
+      throw error;
+    }
+
     const client = getPhonePeClient();
 
     const response = await client.getOrderStatus(orderReference);

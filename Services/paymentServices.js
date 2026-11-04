@@ -316,6 +316,21 @@ async function reconcilePhonePeCheckout({ userId, tenantId, orderReference }) {
     throw error;
   }
 
+  // TEST MODE SAFETY:
+  // Prevent accidently reconcilling a production payment
+  // while the integration is being developed.
+
+  if (
+    order.environment !== "test" ||
+    process.env.PHONEPE_ENVIRONMENT !== "sandbox"
+  ) {
+    const error = new Error(
+      "Only PhonePe sandbox payments are allowed during testing",
+    );
+    error.statusCode = 409;
+    throw error;
+  }
+
   const phonepeService = require("./phonepeService");
 
   // The payment state comes directly from PhonePe,
@@ -357,12 +372,56 @@ async function reconcilePhonePeCheckout({ userId, tenantId, orderReference }) {
       ? rawAmount
       : null;
 
+  // Until the verified gateway transaction ID is captured
+  // and uniquely stored, do not finalize a successful payment.
+  // if (verification.gatewayState === "COMPLETED") {
+  //   const error = new Error(
+  //     "Payment confirmation pending secure transaction verification",
+  //   );
+  //   error.statusCode = 409;
+  //   throw error;
+  // }
+
+  let verifiedTransactionId = null;
+
+  if (verification.gatewayState === "COMPLETED") {
+    const details = gatewayResponse.paymentDetails;
+
+    if (!Array.isArray(details)) {
+      const error = new Error("PhonePe payment details missing");
+      error.statusCode = 409;
+      throw error;
+    }
+
+    const completed = details.filter(
+      (item) => String(item?.state || "").toUpperCase() === "COMPLETED",
+    );
+
+    if (
+      completed.length !== 1 ||
+      typeof completed[0].transactionId !== "string" ||
+      !completed[0].transactionId.trim() ||
+      completed[0].transactionId.length > 150 ||
+      !Number.isSafeInteger(completed[0].amount) ||
+      completed[0].amount !== verifiedAmountPaise
+    ) {
+      const error = new Error(
+        "PhonePe transaction identity or amount requires review",
+      );
+      error.statusCode = 409;
+      throw error;
+    }
+
+    verifiedTransactionId = completed[0].transactionId.trim();
+  }
+
   return paymentRepository.reconcileVerifiedPayment({
     userId,
     tenantId,
     orderReference,
     gatewayState: verification.gatewayState,
     verifiedAmountPaise,
+    verifiedTransactionId,
   });
 }
 
@@ -645,7 +704,11 @@ async function recoverPhonePeInitiation({ userId, tenantId, orderReference }) {
     };
   }
 
-  if (process.env.PHONEPE_PAYMENT_ENABLED !== "true") {
+  // if (process.env.PHONEPE_PAYMENT_ENABLED !== "true") {
+  if (
+    process.env.PHONEPE_PAYMENT_ENABLED !== "true" ||
+    process.env.PHONEPE_ENVIRONMENT !== "sandbox"
+  ) {
     const error = new Error(
       "PhonePe status verification is currently disabled",
     );
@@ -671,6 +734,38 @@ async function recoverPhonePeInitiation({ userId, tenantId, orderReference }) {
     };
   }
 
+  // return {
+  //   orderReference,
+  //   transactionStatus: order.transaction_status,
+  //   paymentStatus: order.payment_status,
+  //   settlementStatus: order.settlement_status,
+  //   accessStatus: order.access_status,
+  //   gatewayState,
+  //   recoveryStatus:
+  //     gatewayState === "PENDING"
+  //       ? "awaiting_gateway_result"
+  //       : "verification_required",
+  //   message:
+  //     gatewayState === "PENDING"
+  //       ? "Payment is not finalized. Do not initiate again."
+  //       : "Gateway returned a terminal state. Reconciliation is required.",
+  // };
+
+  if (gatewayState === "COMPLETED" || gatewayState === "FAILED") {
+    const result = await reconcilePhonePeCheckout({
+      userId,
+      tenantId,
+      orderReference,
+    });
+
+    return {
+      ...result,
+      transactionStatus: order.transaction_status,
+      gatewayState,
+      recoveryStatus: result.requiresReview ? "manual_review" : "reconciled",
+    };
+  }
+
   return {
     orderReference,
     transactionStatus: order.transaction_status,
@@ -678,14 +773,8 @@ async function recoverPhonePeInitiation({ userId, tenantId, orderReference }) {
     settlementStatus: order.settlement_status,
     accessStatus: order.access_status,
     gatewayState,
-    recoveryStatus:
-      gatewayState === "PENDING"
-        ? "awaiting_gateway_result"
-        : "verification_required",
-    message:
-      gatewayState === "PENDING"
-        ? "Payment is not finalized. Do not initiate again."
-        : "Gateway returned a terminal state. Reconciliation is required.",
+    recoveryStatus: "awaiting_gateway_result",
+    message: "Payment is not finalized. Do not initiate again.",
   };
 }
 
