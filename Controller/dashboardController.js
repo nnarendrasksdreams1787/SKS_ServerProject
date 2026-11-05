@@ -17,9 +17,9 @@ const getDashboard = async (req, res) => {
     const [users] = await pool.query(
       `SELECT
             user_id,
-            referral_code AS login_id,
+            reference_id AS login_id,
             full_name,
-            referral_code
+            reference_id
         FROM users
         WHERE user_id = ?
           AND tenant_id = ?

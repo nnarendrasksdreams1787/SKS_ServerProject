@@ -1,5 +1,10 @@
 const pool = require("../DB/db");
-const { saveEbook, deleteEbook } = require("../Services/ebookStorage");
+const {
+  saveEbook,
+  deleteEbook,
+  saveDocx,
+  deleteDocx,
+} = require("../Services/ebookStorage");
 
 const TENANT_ID = 1;
 
@@ -93,6 +98,7 @@ exports.getProductCategories = async (req, res) => {
 
 exports.createProduct = async (req, res) => {
   let savedStorageKey = null;
+  let savedDocxKey = null;
 
   try {
     const {
@@ -159,9 +165,18 @@ exports.createProduct = async (req, res) => {
     //   });
     // }
 
-    if (!req.file) {
+    // if (!req.file) {
+    //   return res.status(400).json({
+    //     message: "Please upload the e-book PDF",
+    //   });
+    // }
+
+    const pdfFile = req.files?.ebook?.[0];
+    const docxFile = req.files?.docx?.[0];
+
+    if (!pdfFile || !docxFile) {
       return res.status(400).json({
-        message: "Please upload the e-book PDF",
+        message: "Both PDF and DOCX files are required",
       });
     }
 
@@ -180,7 +195,10 @@ exports.createProduct = async (req, res) => {
     }
 
     // Save the uploaded PDF in private storage
-    savedStorageKey = await saveEbook(req.file);
+    // savedStorageKey = await saveEbook(req.file);
+
+    savedStorageKey = await saveEbook(pdfFile);
+    savedDocxKey = await saveDocx(docxFile);
 
     // Save the PDF privately; never accept its storage key from the client.
 
@@ -188,8 +206,8 @@ exports.createProduct = async (req, res) => {
       `INSERT INTO products
         (tenant_id, category_id, title, slug, description, author,
          price, stock, tax_percent, cover_image_key,
-         ebook_storage_key, is_active)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         ebook_storage_key, docx_storage_key, is_active)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         TENANT_ID,
         categoryId,
@@ -203,6 +221,7 @@ exports.createProduct = async (req, res) => {
         cover_image_key || null,
         // ebook_storage_key.trim(),
         savedStorageKey,
+        savedDocxKey,
         status === "Active" ? 1 : 0,
       ],
     );
@@ -229,6 +248,14 @@ exports.createProduct = async (req, res) => {
       }
     }
 
+    if (savedDocxKey) {
+      try {
+        await deleteDocx(savedDocxKey);
+      } catch (cleanupError) {
+        console.error("DOCX cleanup failed:", cleanupError.message);
+      }
+    }
+
     return handleDatabaseError(error, res, "Unable to create product");
   }
 };
@@ -237,6 +264,8 @@ exports.createProduct = async (req, res) => {
 exports.updateProduct = async (req, res) => {
   let newStorageKey = null;
   let oldStorageKey = null;
+  let newDocxKey = null;
+  let oldDocxKey = null;
 
   try {
     const productId = req.params.id;
@@ -250,7 +279,7 @@ exports.updateProduct = async (req, res) => {
       author = null,
       tax_percent = 0,
       cover_image_key = null,
-    //   ebook_storage_key,
+      //   ebook_storage_key,
     } = req.body;
 
     if (!/^\d+$/.test(productId) || Number(productId) <= 0) {
@@ -291,7 +320,7 @@ exports.updateProduct = async (req, res) => {
     }
 
     const [existingRows] = await pool.execute(
-      `SELECT ebook_storage_key
+      `SELECT ebook_storage_key, docx_storage_key
        FROM products
        WHERE product_id = ? AND tenant_id = ?
        LIMIT 1`,
@@ -303,6 +332,7 @@ exports.updateProduct = async (req, res) => {
     }
 
     oldStorageKey = existingRows[0].ebook_storage_key;
+    oldDocxKey = existingRows[0].docx_storage_key;
 
     const [categories] = await pool.execute(
       `SELECT category_id
@@ -320,9 +350,20 @@ exports.updateProduct = async (req, res) => {
 
     // If omitted, retain the existing private storage key.
     // let storageKey = ebook_storage_key;
-    let storageKey = req.file
-      ? (newStorageKey = await saveEbook(req.file))
+    // let storageKey = req.file
+    //   ? (newStorageKey = await saveEbook(req.file))
+    //   : oldStorageKey;
+
+    const pdfFile = req.files?.ebook?.[0];
+    const docxFile = req.files?.docx?.[0];
+
+    let storageKey = pdfFile
+      ? (newStorageKey = await saveEbook(pdfFile))
       : oldStorageKey;
+
+    let docxStorageKey = docxFile
+      ? (newDocxKey = await saveDocx(docxFile))
+      : oldDocxKey;
 
     if (typeof storageKey !== "string" || !storageKey.trim()) {
       const [existing] = await pool.execute(
@@ -344,7 +385,8 @@ exports.updateProduct = async (req, res) => {
       `UPDATE products
        SET category_id = ?, title = ?, slug = ?, description = ?,
            author = ?, price = ?, stock = ?, tax_percent = ?,
-           cover_image_key = ?, ebook_storage_key = ?, is_active = ?
+           cover_image_key = ?, ebook_storage_key = ?,
+           docx_storage_key = ?, is_active = ?
        WHERE product_id = ? AND tenant_id = ?`,
       [
         categoryId,
@@ -357,6 +399,7 @@ exports.updateProduct = async (req, res) => {
         taxPercent,
         cover_image_key,
         storageKey.trim(),
+        docxStorageKey || null,
         status === "Active" ? 1 : 0,
         productId,
         TENANT_ID,
@@ -385,6 +428,22 @@ exports.updateProduct = async (req, res) => {
       }
     }
 
+    if (newDocxKey && oldDocxKey && oldDocxKey !== newDocxKey) {
+      try {
+        const [references] = await pool.execute(
+          `SELECT product_id FROM products
+       WHERE docx_storage_key = ? LIMIT 1`,
+          [oldDocxKey],
+        );
+
+        if (!references.length) {
+          await deleteDocx(oldDocxKey);
+        }
+      } catch (cleanupError) {
+        console.error("Old DOCX cleanup failed:", cleanupError.message);
+      }
+    }
+
     return res.json({ message: "Product updated successfully" });
   } catch (error) {
     if (newStorageKey) {
@@ -392,6 +451,14 @@ exports.updateProduct = async (req, res) => {
         await deleteEbook(newStorageKey);
       } catch (cleanupError) {
         console.error("New e-bbok cleanup failed", cleanupError.message);
+      }
+    }
+
+    if (newDocxKey) {
+      try {
+        await deleteDocx(newDocxKey);
+      } catch (cleanupError) {
+        console.error("New DOCX cleanup failed:", cleanupError.message);
       }
     }
 
@@ -507,8 +574,6 @@ exports.createProductCategory = async (req, res) => {
   }
 };
 
-
-
 exports.updateProductCategory = async (req, res) => {
   try {
     const categoryId = req.params.id;
@@ -537,7 +602,7 @@ exports.updateProductCategory = async (req, res) => {
        FROM categories
        WHERE category_id = ? AND tenant_id = ?
        LIMIT 1`,
-      [categoryId, TENANT_ID]
+      [categoryId, TENANT_ID],
     );
 
     if (!existing.length) {
@@ -549,7 +614,7 @@ exports.updateProductCategory = async (req, res) => {
        FROM categories
        WHERE tenant_id = ? AND slug = ? AND category_id <> ?
        LIMIT 1`,
-      [TENANT_ID, slug, categoryId]
+      [TENANT_ID, slug, categoryId],
     );
 
     if (duplicate.length) {
@@ -562,7 +627,7 @@ exports.updateProductCategory = async (req, res) => {
       `UPDATE categories
        SET name = ?, slug = ?
        WHERE category_id = ? AND tenant_id = ?`,
-      [name, slug, categoryId, TENANT_ID]
+      [name, slug, categoryId, TENANT_ID],
     );
 
     return res.json({
@@ -574,14 +639,9 @@ exports.updateProductCategory = async (req, res) => {
       },
     });
   } catch (error) {
-    return handleDatabaseError(
-      error,
-      res,
-      "Unable to update category"
-    );
+    return handleDatabaseError(error, res, "Unable to update category");
   }
 };
-
 
 exports.updateProductCategoryStatus = async (req, res) => {
   try {
@@ -603,7 +663,7 @@ exports.updateProductCategoryStatus = async (req, res) => {
        FROM categories
        WHERE category_id = ? AND tenant_id = ?
        LIMIT 1`,
-      [categoryId, TENANT_ID]
+      [categoryId, TENANT_ID],
     );
 
     if (!categories.length) {
@@ -616,12 +676,13 @@ exports.updateProductCategoryStatus = async (req, res) => {
          FROM products
          WHERE category_id = ? AND tenant_id = ?
          LIMIT 1`,
-        [categoryId, TENANT_ID]
+        [categoryId, TENANT_ID],
       );
 
       if (products.length) {
         return res.status(409).json({
-          message: "This category contains products. Reassign those products before deactivating it.",
+          message:
+            "This category contains products. Reassign those products before deactivating it.",
         });
       }
     }
@@ -630,22 +691,16 @@ exports.updateProductCategoryStatus = async (req, res) => {
       `UPDATE categories
        SET is_active = ?
        WHERE category_id = ? AND tenant_id = ?`,
-      [status === "Active" ? 1 : 0, categoryId, TENANT_ID]
+      [status === "Active" ? 1 : 0, categoryId, TENANT_ID],
     );
 
     return res.json({
       message: `Category ${status.toLowerCase()} successfully`,
     });
   } catch (error) {
-    return handleDatabaseError(
-      error,
-      res,
-      "Unable to update category status"
-    );
+    return handleDatabaseError(error, res, "Unable to update category status");
   }
 };
-
-
 
 exports.deleteProduct = async (req, res) => {
   try {
@@ -662,7 +717,7 @@ exports.deleteProduct = async (req, res) => {
        FROM products
        WHERE product_id = ? AND tenant_id = ?
        LIMIT 1`,
-      [productId, TENANT_ID]
+      [productId, TENANT_ID],
     );
 
     if (!products.length) {
@@ -681,7 +736,7 @@ exports.deleteProduct = async (req, res) => {
       const [result] = await connection.execute(
         `DELETE FROM products
          WHERE product_id = ? AND tenant_id = ?`,
-        [productId, TENANT_ID]
+        [productId, TENANT_ID],
       );
 
       if (result.affectedRows !== 1) {
@@ -707,7 +762,7 @@ exports.deleteProduct = async (req, res) => {
          FROM products
          WHERE ebook_storage_key = ?
          LIMIT 1`,
-        [storageKey]
+        [storageKey],
       );
 
       if (!references.length) {
@@ -716,7 +771,7 @@ exports.deleteProduct = async (req, res) => {
         } catch (cleanupError) {
           console.error(
             "Deleted product PDF cleanup failed:",
-            cleanupError.message
+            cleanupError.message,
           );
         }
       }
@@ -726,10 +781,6 @@ exports.deleteProduct = async (req, res) => {
       message: "Product deleted successfully",
     });
   } catch (error) {
-    return handleDatabaseError(
-      error,
-      res,
-      "Unable to delete product"
-    );
+    return handleDatabaseError(error, res, "Unable to delete product");
   }
 };

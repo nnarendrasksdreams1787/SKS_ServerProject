@@ -136,7 +136,7 @@ async function checkBookAccess({ userId, productId }) {
     ORDER BY ea.granted_at DESC
     LIMIT 1
     `,
-    [TENANT_ID, uid, pid]
+    [TENANT_ID, uid, pid],
   );
 
   if (!rows.length) {
@@ -165,17 +165,47 @@ async function getMyPurchasedBooks(userId) {
   }
 
   const [rows] = await pool.execute(
+    // `
+    // SELECT DISTINCT ea.product_id
+    // FROM ebook_access ea
+    // INNER JOIN order_items oi
+    //   ON oi.tenant_id = ea.tenant_id
+    //  AND oi.order_item_id = ea.order_item_id
+    //  AND oi.product_id = ea.product_id
+    // INNER JOIN orders o
+    //   ON o.tenant_id = oi.tenant_id
+    //  AND o.order_id = oi.order_id
+    //  AND o.user_id = ea.user_id
+    // WHERE ea.tenant_id = ?
+    //   AND ea.user_id = ?
+    //   AND ea.revoked_at IS NULL
+    //   AND o.status = 'paid'
+    //   AND EXISTS (
+    //     SELECT 1
+    //     FROM payments p
+    //     WHERE p.tenant_id = o.tenant_id
+    //       AND p.order_id = o.order_id
+    //       AND p.status = 'success'
+    //   )
+    // ORDER BY ea.product_id ASC
+    // `,
+
     `
-    SELECT DISTINCT ea.product_id
+    SELECT DISTINCT
+      ea.product_id,
+      pr.title
     FROM ebook_access ea
     INNER JOIN order_items oi
       ON oi.tenant_id = ea.tenant_id
-     AND oi.order_item_id = ea.order_item_id
-     AND oi.product_id = ea.product_id
+    AND oi.order_item_id = ea.order_item_id
+    AND oi.product_id = ea.product_id
     INNER JOIN orders o
       ON o.tenant_id = oi.tenant_id
-     AND o.order_id = oi.order_id
-     AND o.user_id = ea.user_id
+    AND o.order_id = oi.order_id
+    AND o.user_id = ea.user_id
+    INNER JOIN products pr
+      ON pr.tenant_id = ea.tenant_id
+    AND pr.product_id = ea.product_id
     WHERE ea.tenant_id = ?
       AND ea.user_id = ?
       AND ea.revoked_at IS NULL
@@ -189,7 +219,7 @@ async function getMyPurchasedBooks(userId) {
       )
     ORDER BY ea.product_id ASC
     `,
-    [TENANT_ID, uid]
+  [TENANT_ID, uid],
   );
 
   return rows;

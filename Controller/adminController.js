@@ -43,8 +43,8 @@ exports.login = async (req, res) => {
 
     const admin = admins[0];
 
-    const passwordMatches = 
-        admin && typeof password === "string"
+    const passwordMatches =
+      admin && typeof password === "string"
         ? await bcrypt.compare(password, admin.password_hash)
         : false;
 
@@ -52,14 +52,10 @@ exports.login = async (req, res) => {
     // console.log("Admin active: ", admin?.status == "active");
     // console.log("Password matches:", passwordMatches);
 
-    if (
-        !admin ||
-        admin.status !== "active" ||
-        !passwordMatches
-    ){
-        return res.status(401).json({
-            message: "Invalid email or password",
-        })
+    if (!admin || admin.status !== "active" || !passwordMatches) {
+      return res.status(401).json({
+        message: "Invalid email or password",
+      });
     }
 
     // Use a generic response to avoid reveling account status.
@@ -104,7 +100,6 @@ exports.me = (req, res) => {
   });
 };
 
-
 exports.logout = (req, res) => {
   req.session.destroy((error) => {
     if (error) {
@@ -126,8 +121,6 @@ exports.logout = (req, res) => {
     });
   });
 };
-
-
 
 exports.setupFirstAdmin = async (req, res) => {
   let connection;
@@ -152,7 +145,6 @@ exports.setupFirstAdmin = async (req, res) => {
     //     suppliedSecreate.length
     // );
     // console.log("Expected secret length: ", expectedSecreate.length)
-
 
     if (
       supplied.length !== expected.length ||
@@ -182,10 +174,20 @@ exports.setupFirstAdmin = async (req, res) => {
     }
 
     connection = await pool.getConnection();
-    await connection.beginTransaction();
+    // await connection.beginTransaction();
 
     // Lock the admin table for concurrent setup requests.
-    await connection.query("LOCK TABLES platform_admins WRITE");
+    // await connection.query("LOCK TABLES platform_admins WRITE");
+
+    await connection.beginTransaction();
+
+    const [lockRows] = await connection.query(
+      "SELECT GET_LOCK('sks_first_admin_setup', 10) AS acquired",
+    );
+
+    if (lockRows[0]?.acquired !== 1) {
+      throw new Error("Unable to acquire admin setup lock");
+    }
 
     const [existing] = await connection.query(
       "SELECT admin_id FROM platform_admins LIMIT 1",
@@ -234,18 +236,13 @@ exports.setupFirstAdmin = async (req, res) => {
   }
 };
 
-
-
-
-
 // exports.getDashboardStats = async (req, res) => {
 //   try {
 //     // SKS Dream tenant
-    
 
 //     const [rows] = await pool.execute(
 //       `
-//             SELECT 
+//             SELECT
 //                 (SELECT COUNT(*) FROM users) AS totalCustomers,
 //                 (SELECT COUNT(*) FROM products) AS totalProducts,
 //                 (SELECT COUNT(*) FROM orders) AS totalOrders,
@@ -254,8 +251,6 @@ exports.setupFirstAdmin = async (req, res) => {
 //                     FROM withdrawal_requests
 //                     WHERE status = "pending"
 //                 ) AS pendingPayouts
-                
-
 
 //             `,
 //     );
@@ -278,9 +273,6 @@ exports.setupFirstAdmin = async (req, res) => {
 //     })
 //   }
 // };
-
-
-
 
 exports.getDashboardStats = async (req, res) => {
   try {
@@ -351,7 +343,7 @@ exports.getDashboardStats = async (req, res) => {
         TENANT_ID,
         TENANT_ID,
         TENANT_ID,
-      ]
+      ],
     );
 
     const row = rows[0];

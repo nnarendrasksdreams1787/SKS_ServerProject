@@ -25,10 +25,7 @@ async function checkAccess(req, res) {
 
 async function myBooks(req, res) {
   try {
-    const books =
-      await bookAccessService.getMyPurchasedBooks(
-        req.user.userId
-      );
+    const books = await bookAccessService.getMyPurchasedBooks(req.user.userId);
 
     return res.status(200).json({
       success: true,
@@ -45,7 +42,223 @@ async function myBooks(req, res) {
   }
 }
 
+async function streamPurchasedPdf(req, res) {
+  const fs = require("node:fs");
+  const fsp = require("node:fs/promises");
+  const pool = require("../DB/db");
+  const { resolveEbookPath } = require("../Services/ebookStorage");
+
+  try {
+    const userId = Number(req.user.userId);
+    const productId = Number(req.params.productId);
+    const tenantId = Number(req.user.tenantId || 1);
+
+    if (!Number.isSafeInteger(productId) || productId <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid product ID",
+      });
+    }
+
+    // Verify the logged-in user's paid purchase first.
+    const access = await bookAccessService.checkBookAccess({
+      userId,
+      productId,
+    });
+
+    if (!access.hasAccess) {
+      return res.status(403).json({
+        success: false,
+        message: "Purchase required to read this book",
+      });
+    }
+
+    const [rows] = await pool.execute(
+      `SELECT ebook_storage_key
+       FROM products
+       WHERE tenant_id = ?
+         AND product_id = ?
+       LIMIT 1`,
+      [tenantId, productId],
+    );
+
+    if (!rows.length || !rows[0].ebook_storage_key) {
+      return res.status(404).json({
+        success: false,
+        message: "Ebook file is not available",
+      });
+    }
+
+    let filePath;
+
+    try {
+      filePath = resolveEbookPath(rows[0].ebook_storage_key);
+    } catch {
+      return res.status(404).json({
+        success: false,
+        message: "Ebook file has not been uploaded",
+      });
+    }
+
+    let stats;
+
+    try {
+      stats = await fsp.stat(filePath);
+      if (!stats.isFile()) throw new Error("Not a file");
+    } catch {
+      return res.status(404).json({
+        success: false,
+        message: "Ebook PDF not found",
+      });
+    }
+
+    res.set({
+      "Content-Type": "application/pdf",
+      "Content-Length": stats.size,
+      "Content-Disposition": "inline",
+      "Cache-Control": "private, no-store",
+      "X-Content-Type-Options": "nosniff",
+    });
+
+    const stream = fs.createReadStream(filePath);
+
+    stream.on("error", (error) => {
+      console.error("Ebook stream error:", error.message);
+      if (!res.headersSent) {
+        res.status(500).json({
+          success: false,
+          message: "Unable to read ebook",
+        });
+      } else {
+        res.destroy(error);
+      }
+    });
+
+    stream.pipe(res);
+  } catch (error) {
+    console.error("Purchased PDF error:", error.message);
+
+    if (!res.headersSent) {
+      return res.status(500).json({
+        success: false,
+        message: "Unable to load purchased ebook",
+      });
+    }
+  }
+}
+
+async function streamPurchasedDocx(req, res) {
+  const fs = require("node:fs");
+  const fsp = require("node:fs/promises");
+  const pool = require("../DB/db");
+  const { resolveDocxPath } = require("../Services/ebookStorage");
+
+  try {
+    const userId = Number(req.user.userId);
+    const productId = Number(req.params.productId);
+    const tenantId = Number(req.user.tenantId || 1);
+
+    if (!Number.isSafeInteger(productId) || productId <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid product ID",
+      });
+    }
+
+    // Only a user with verified paid access may read this DOCX.
+    const access = await bookAccessService.checkBookAccess({
+      userId,
+      productId,
+    });
+
+    if (!access.hasAccess) {
+      return res.status(403).json({
+        success: false,
+        message: "Purchase required to read this book",
+      });
+    }
+
+    const [rows] = await pool.execute(
+      `SELECT docx_storage_key
+       FROM products
+       WHERE tenant_id = ?
+         AND product_id = ?
+       LIMIT 1`,
+      [tenantId, productId],
+    );
+
+    if (!rows.length || !rows[0].docx_storage_key) {
+      return res.status(404).json({
+        success: false,
+        message: "Ebook DOCX is not available",
+      });
+    }
+
+    let filePath;
+
+    try {
+      filePath = resolveDocxPath(rows[0].docx_storage_key);
+    } catch {
+      return res.status(404).json({
+        success: false,
+        message: "Ebook DOCX has not been uploaded",
+      });
+    }
+
+    let stats;
+
+    try {
+      stats = await fsp.stat(filePath);
+      if (!stats.isFile()) {
+        throw new Error("Not a file");
+      }
+    } catch {
+      return res.status(404).json({
+        success: false,
+        message: "Ebook DOCX not found",
+      });
+    }
+
+    res.set({
+      "Content-Type":
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "Content-Length": stats.size,
+      "Content-Disposition": "attachment",
+      "Cache-Control": "private, no-store",
+      "X-Content-Type-Options": "nosniff",
+    });
+
+    const stream = fs.createReadStream(filePath);
+
+    stream.on("error", (error) => {
+      console.error("Ebook DOCX stream error:", error.message);
+
+      if (!res.headersSent) {
+        res.status(500).json({
+          success: false,
+          message: "Unable to read ebook DOCX",
+        });
+      } else {
+        res.destroy(error);
+      }
+    });
+
+    stream.pipe(res);
+  } catch (error) {
+    console.error("Purchased DOCX error:", error.message);
+
+    if (!res.headersSent) {
+      return res.status(500).json({
+        success: false,
+        message: "Unable to load purchased ebook DOCX",
+      });
+    }
+  }
+}
+
 module.exports = {
   checkAccess,
   myBooks,
+  streamPurchasedPdf,
+  streamPurchasedDocx,
 };

@@ -11,10 +11,9 @@ const PORT = process.env.PORT || 4010;
 
 const userRoutes = require("./Routing/userRoutes");
 
-const paymentRoutes = require("./Routing/PaymentRoutes")
+const paymentRoutes = require("./Routing/PaymentRoutes");
 
 const isProduction = process.env.NODE_ENV == "production";
-
 
 const {
   startPhonePeWebhookWorker,
@@ -22,13 +21,9 @@ const {
 const settleRoutes = require("./Routing/SettlementRoutes");
 const bookAccRoutes = require("./Routing/BookAccessRoutes");
 
-
 if (!process.env.SESSION_SECRET) {
   throw new Error("SESSION_SECRET is required");
 }
-
-
-
 
 if (isProduction) {
   // Required when HTTPS terminaes at a trusted revese proxy
@@ -51,7 +46,7 @@ app.use(
         req.rawBody = buf.toString("utf8");
       }
     },
-  })
+  }),
 );
 
 app.use(express.urlencoded({ extended: true }));
@@ -108,14 +103,49 @@ app.use("/api/admin", adminRoute);
 
 app.use("/api/user", userRoutes);
 
-
-app.use("/api/payments", paymentRoutes );
+app.use("/api/payments", paymentRoutes);
 
 app.use("/api/settlements", settleRoutes);
 
-app.use("api/library", bookAccRoutes);
+app.use("/api/library", bookAccRoutes);
 
+app.get("/api/products", async (req, res) => {
+  try {
+    const pool = require("./DB/db");
 
+    const [rows] = await pool.execute(
+      `SELECT
+         p.product_id AS id,
+         p.title AS name,
+         p.slug,
+         p.description,
+         p.author,
+         c.name AS category,
+         p.price,
+         p.cover_image_key
+       FROM products p
+       INNER JOIN categories c
+         ON c.category_id = p.category_id
+        AND c.tenant_id = p.tenant_id
+       WHERE p.tenant_id = ?
+         AND p.is_active = 1
+       ORDER BY p.created_at DESC`,
+      [1],
+    );
+
+    res.json({
+      products: rows.map((product) => ({
+        ...product,
+        price: Number(product.price),
+      })),
+    });
+  } catch (error) {
+    console.error("Public products error:", error.message);
+    res.status(500).json({
+      message: "Unable to load products",
+    });
+  }
+});
 
 async function startServer() {
   try {

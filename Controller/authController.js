@@ -694,11 +694,6 @@
 
 // module.exports = { register, login };
 
-
-
-
-
-
 const pool = require("../DB/db");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
@@ -882,7 +877,7 @@ const register = async (req, res) => {
         `SELECT user_id
          FROM users
          WHERE tenant_id = ?
-           AND referral_code = ?
+           AND referral_id = ?
            AND status = 'active'
          LIMIT 1`,
         [TENANT_ID, normalizedReferralId],
@@ -943,19 +938,21 @@ const register = async (req, res) => {
     const temporaryReferralCode = `TMP${crypto.randomBytes(8).toString("hex").toUpperCase()}`;
 
     // 6. Insert account into users
+
     const [result] = await connection.execute(
       `INSERT INTO users (
-        tenant_id,
-        referral_code,
-        sponsor_id,
-        full_name,
-        email,
-        mobile,
-        password_hash
-      ) VALUES (?, ?, ?, ?, NULL, ?, ?)`,
+    tenant_id,
+    reference_id,
+    referral_id,
+    sponsor_id,
+    full_name,
+    mobile,
+    password_hash
+  ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
       [
         TENANT_ID,
         temporaryReferralCode,
+        normalizedReferralId || null,
         sponsorId,
         full_name.trim(),
         mobile_no.trim(),
@@ -973,7 +970,7 @@ const register = async (req, res) => {
     // 8. Update final Reference ID
     await connection.execute(
       `UPDATE users
-       SET referral_code = ?
+       SET reference_id = ?
        WHERE tenant_id = ? AND user_id = ?`,
       [referenceId, TENANT_ID, userId],
     );
@@ -1087,12 +1084,17 @@ const login = async (req, res) => {
 
     // 1. Find user by Reference ID
     const [users] = await pool.execute(
-      `SELECT user_id, referral_code, full_name,
-              mobile, password_hash, status
-       FROM users
-       WHERE tenant_id = ?
-         AND referral_code = ?
-       LIMIT 1`,
+      `SELECT
+     user_id,
+     reference_id,
+     full_name,
+     mobile,
+     password_hash,
+     status
+   FROM users
+   WHERE tenant_id = ?
+     AND reference_id = ?
+   LIMIT 1`,
       [TENANT_ID, reference_id.trim().toUpperCase()],
     );
 
@@ -1162,7 +1164,7 @@ const login = async (req, res) => {
 
       user: {
         id: user.user_id,
-        reference_id: user.referral_code,
+        reference_id: user.reference_id,
         full_name: user.full_name,
         mobile_no: user.mobile,
       },

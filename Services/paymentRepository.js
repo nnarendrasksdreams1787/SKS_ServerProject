@@ -392,12 +392,14 @@ async function createPendingPaymentOrder({
     //   100n,
     // );
 
+    
     if (taxBasisPoints > 10000n) {
       throw new Error("Invalid product tax percentage");
     }
 
     // Round tax to the nearest paise.
-    const taxPaise = (subtotalPaise * taxPercentBasisPoints + 5000n) / 10000n;
+    // const taxPaise = (subtotalPaise * taxPercentBasisPoints + 5000n) / 10000n;
+    const taxPaise = (subtotalPaise * taxBasisPoints + 5000n) / 10000n;
 
     const amountPaise = subtotalPaise + taxPaise;
 

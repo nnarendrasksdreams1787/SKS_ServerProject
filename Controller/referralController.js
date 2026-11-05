@@ -7,12 +7,7 @@ const getDirectReferrals = async (req, res) => {
     const { userId, tenantId } = req.user;
 
     // Search filters from frontend
-    const {
-      name = "",
-      status = "",
-      fromDate = "",
-      toDate = "",
-    } = req.query;
+    const { name = "", status = "", fromDate = "", toDate = "" } = req.query;
 
     // Validate status
     const allowedStatuses = ["active", "blocked", "pending"];
@@ -59,9 +54,9 @@ const getDirectReferrals = async (req, res) => {
     let query = `
       SELECT
         user_id,
-        login_id,
+        reference_id AS login_id,
         full_name,
-        referral_code AS login_id,
+        reference_id,
         status,
         created_at
       FROM users

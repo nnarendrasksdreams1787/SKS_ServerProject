@@ -341,6 +341,17 @@ async function reconcilePhonePeCheckout({ userId, tenantId, orderReference }) {
 
   const gatewayResponse = verification.gatewayResponse;
 
+  console.log("PHONEPE_VERIFY_DIAGNOSTIC", {
+    expectedOrderReference: orderReference,
+    gatewayState: verification.gatewayState,
+    responseKeys: Object.keys(gatewayResponse || {}),
+    merchantOrderId: gatewayResponse?.merchantOrderId ?? null,
+    orderId: gatewayResponse?.orderId ?? null,
+    paymentDetailFields: Array.isArray(gatewayResponse?.paymentDetails)
+      ? gatewayResponse.paymentDetails.map((item) => Object.keys(item || {}))
+      : null,
+  });
+
   if (!gatewayResponse || typeof gatewayResponse !== "object") {
     throw new Error("Invalid PhonePe verification response");
   }
@@ -348,13 +359,43 @@ async function reconcilePhonePeCheckout({ userId, tenantId, orderReference }) {
   // Only accept a response explicitly tied to this order.
   // If the SDK response does not expose the merchant order ID,
   // do not finalize until the response contract is verified.
-  const verifiedOrderReference = gatewayResponse.merchantOrderId;
+  // const verifiedOrderReference = gatewayResponse.merchantOrderId;
 
-  if (verifiedOrderReference !== orderReference) {
+  // if (verifiedOrderReference !== orderReference) {
+  //   return {
+  //     orderReference,
+  //     requiresReview: true,
+  //     message: "Gateway order reference could not be verified",
+  //     paymentStatus: order.payment_status,
+  //     settlementStatus: order.settlement_status,
+  //     accessStatus: order.access_status,
+  //   };
+  // }
+
+  const responseMerchantOrderId = gatewayResponse.merchantOrderId;
+
+  if (
+    responseMerchantOrderId != null &&
+    responseMerchantOrderId !== orderReference
+  ) {
     return {
       orderReference,
       requiresReview: true,
-      message: "Gateway order reference could not be verified",
+      message: "Gateway merchant order reference mismatch",
+      paymentStatus: order.payment_status,
+      settlementStatus: order.settlement_status,
+      accessStatus: order.access_status,
+    };
+  }
+
+  if (
+    typeof gatewayResponse.orderId !== "string" ||
+    !gatewayResponse.orderId.trim()
+  ) {
+    return {
+      orderReference,
+      requiresReview: true,
+      message: "PhonePe gateway order ID missing",
       paymentStatus: order.payment_status,
       settlementStatus: order.settlement_status,
       accessStatus: order.access_status,

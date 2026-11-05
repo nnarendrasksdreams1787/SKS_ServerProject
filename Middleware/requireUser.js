@@ -84,17 +84,17 @@ const requireUser = async (req, res, next) => {
 
     const [users] = await pool.query(
       `SELECT
-     user_id,
-     tenant_id,
-     referral_code AS login_id,
-     full_name,
-     referral_code,
-     sponsor_id,
-     status
-   FROM users
-   WHERE user_id = ?
-     AND tenant_id = ?
-   LIMIT 1`,
+          user_id,
+          tenant_id,
+          reference_id AS login_id,
+          full_name,
+          referral_id,
+          sponsor_id,
+          status
+        FROM users
+        WHERE user_id = ?
+          AND tenant_id = ?
+        LIMIT 1`,
       [decoded.userId, decoded.tenantId],
     );
 
@@ -120,7 +120,7 @@ const requireUser = async (req, res, next) => {
       tenantId: user.tenant_id,
       loginId: user.login_id,
       fullName: user.full_name,
-      referralCode: user.referral_code,
+      referralCode: user.login_id,
       sponsorId: user.sponsor_id,
     };
 
