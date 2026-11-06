@@ -877,7 +877,7 @@ const register = async (req, res) => {
         `SELECT user_id
          FROM users
          WHERE tenant_id = ?
-           AND referral_id = ?
+           AND reference_id = ?
            AND status = 'active'
          LIMIT 1`,
         [TENANT_ID, normalizedReferralId],
@@ -962,6 +962,17 @@ const register = async (req, res) => {
 
     const userId = result.insertId;
 
+    // Initialize wallet for every newly registered user
+    await connection.execute(
+      `INSERT INTO wallets (
+      tenant_id,
+      user_id,
+      available_balance,
+      reserved_balance
+   ) VALUES (?, ?, 0.00, 0.00)`,
+      [TENANT_ID, userId],
+    );
+
     // 7. Generate Reference ID from first two name letters
     const namePrefix = generateReferencePrefix(full_name);
 
@@ -1008,12 +1019,34 @@ const register = async (req, res) => {
     );
 
     // 10. Update referral hierarchy
+    // if (sponsorId !== null) {
+    //   await connection.execute("CALL sp_add_referral_paths(?, ?, ?)", [
+    //     TENANT_ID,
+    //     userId,
+    //     sponsorId,
+    //   ]);
+    // }
+
     if (sponsorId !== null) {
-      await connection.execute("CALL sp_add_referral_paths(?, ?, ?)", [
-        TENANT_ID,
-        userId,
-        sponsorId,
-      ]);
+      // Direct sponsor -> new user (Level 1)
+      await connection.execute(
+        `INSERT INTO referral_paths
+       (tenant_id, ancestor_id, descendant_id, level)
+     VALUES (?, ?, ?, 1)`,
+        [TENANT_ID, sponsorId, userId],
+      );
+
+      // Sponsor ke existing ancestors -> new user
+      await connection.execute(
+        `INSERT INTO referral_paths
+       (tenant_id, ancestor_id, descendant_id, level)
+     SELECT tenant_id, ancestor_id, ?, level + 1
+     FROM referral_paths
+     WHERE tenant_id = ?
+       AND descendant_id = ?
+       AND level < 255`,
+        [userId, TENANT_ID, sponsorId],
+      );
     }
 
     // 11. Commit transaction

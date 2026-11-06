@@ -49,6 +49,7 @@ async function initiateGatewayPayment({
   providerCode,
   orderReference,
   amountPaise,
+  customer,
 }) {
   if (
     typeof orderReference !== "string" ||
@@ -79,6 +80,7 @@ async function initiateGatewayPayment({
   const result = await service.createPayment({
     orderReference,
     amountPaise,
+     ...(providerCode === "mswipe" ? { customer } : {}),
   });
 
   if (!result || typeof result.checkoutUrl !== "string") {

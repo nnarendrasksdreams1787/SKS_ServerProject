@@ -538,6 +538,8 @@ const RECOVERY_BATCH_SIZE = 5;
 
 let lastRecoveryRun = 0;
 
+let lastRecoveryOrderId = 0;
+
 let timer = null;
 let running = false;
 
@@ -806,12 +808,82 @@ async function processEvent(event) {
   }
 }
 
+// async function recoverPendingPhonePePayments() {
+//   const [orders] = await pool.execute(
+//     `
+//     SELECT
+//       o.user_id,
+//       o.tenant_id,
+//       o.order_number AS order_reference
+//     FROM orders o
+//     INNER JOIN payments p
+//       ON p.tenant_id = o.tenant_id
+//       AND p.order_id = o.order_id
+//     WHERE o.tenant_id = ?
+//       AND o.payment_environment = 'test'
+//       AND o.status = 'pending'
+//       AND p.gateway = 'phonepe'
+//       AND p.status = 'initiated'
+//       AND p.initiation_status IN (
+//         'initiating',
+//         'initiated',
+//         'initiation_unknown'
+//       )
+//       AND o.order_number REGEXP '^SKS_[a-f0-9]{32}$'
+//       AND o.created_at <= NOW() - INTERVAL 2 MINUTE
 
+//     ORDER BY o.created_at ASC
+//     LIMIT ${RECOVERY_BATCH_SIZE}
+//     `,
+//     [TENANT_ID],
+//   );
+
+//   for (const order of orders) {
+//     try {
+//       const result = await paymentServices.reconcilePhonePeCheckout({
+//         userId: Number(order.user_id),
+//         tenantId: Number(order.tenant_id),
+//         orderReference: order.order_reference,
+//       });
+
+//       if (result.requiresReview) {
+//         console.error("PHONEPE_RECOVERY_REVIEW_REQUIRED", {
+//           orderReference: order.order_reference,
+//           message: result.message || "Manual review required",
+//         });
+//         continue;
+//       }
+
+//       if (
+//         result.paymentStatus === "success" &&
+//         result.accessStatus !== "granted"
+//       ) {
+//         console.error("PHONEPE_RECOVERY_ACCESS_REVIEW", {
+//           orderReference: order.order_reference,
+//         });
+//         continue;
+//       }
+
+//       if (["success", "failed"].includes(result.paymentStatus)) {
+//         console.log("PHONEPE_PAYMENT_RECOVERED", {
+//           orderReference: order.order_reference,
+//           paymentStatus: result.paymentStatus,
+//           accessStatus: result.accessStatus,
+//         });
+//       }
+//     } catch (error) {
+//       console.error("PHONEPE_RECOVERY_ERROR", {
+//         orderReference: order.order_reference,
+//         message: error.message,
+//       });
+//     }
+//   }
+// }
 
 async function recoverPendingPhonePePayments() {
-  const [orders] = await pool.execute(
-    `
+  const query = `
     SELECT
+      o.order_id,
       o.user_id,
       o.tenant_id,
       o.order_number AS order_reference
@@ -820,6 +892,7 @@ async function recoverPendingPhonePePayments() {
       ON p.tenant_id = o.tenant_id
       AND p.order_id = o.order_id
     WHERE o.tenant_id = ?
+      AND o.order_id > ?
       AND o.payment_environment = 'test'
       AND o.status = 'pending'
       AND p.gateway = 'phonepe'
@@ -831,14 +904,24 @@ async function recoverPendingPhonePePayments() {
       )
       AND o.order_number REGEXP '^SKS_[a-f0-9]{32}$'
       AND o.created_at <= NOW() - INTERVAL 2 MINUTE
-      AND o.created_at >= NOW() - INTERVAL 30 MINUTE
-    ORDER BY o.created_at ASC
+    ORDER BY o.order_id ASC
     LIMIT ${RECOVERY_BATCH_SIZE}
-    `,
-    [TENANT_ID],
-  );
+  `;
+
+  let [orders] = await pool.execute(query, [TENANT_ID, lastRecoveryOrderId]);
+
+  // All eligible orders scanned: begin another pass.
+  if (orders.length === 0 && lastRecoveryOrderId > 0) {
+    lastRecoveryOrderId = 0;
+
+    [orders] = await pool.execute(query, [TENANT_ID, 0]);
+  }
 
   for (const order of orders) {
+    // Advance even if gateway verification fails.
+    // This prevents one problematic order blocking others.
+    lastRecoveryOrderId = Number(order.order_id);
+
     try {
       const result = await paymentServices.reconcilePhonePeCheckout({
         userId: Number(order.user_id),
@@ -878,14 +961,12 @@ async function recoverPendingPhonePePayments() {
       });
     }
   }
+
+  console.log("PHONEPE_RECOVERY_BATCH", {
+    checked: orders.length,
+    lastOrderId: lastRecoveryOrderId,
+  });
 }
-
-
-
-
-
-
-
 
 async function runPhonePeWebhookWorker() {
   if (running) return;
@@ -908,11 +989,10 @@ async function runPhonePeWebhookWorker() {
 
     const now = Date.now();
 
-    if (now - lastRecoveryRun >= RECOVERY_INTERVAL_MS){
+    if (now - lastRecoveryRun >= RECOVERY_INTERVAL_MS) {
       lastRecoveryRun = now;
       await recoverPendingPhonePePayments();
     }
-
 
     const [events] = await pool.execute(
       `
@@ -942,16 +1022,6 @@ async function runPhonePeWebhookWorker() {
     running = false;
   }
 }
-
-
-
-
-
-
-
-
-
-
 
 function startPhonePeWebhookWorker() {
   if (timer) return;

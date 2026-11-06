@@ -9,6 +9,8 @@ const authRoute = require("./Routing/authRoutes");
 const adminRoute = require("./Routing/adminRoutes");
 const PORT = process.env.PORT || 4010;
 
+const { startCommissionWorker } = require("./Services/commissionWorker");
+
 const userRoutes = require("./Routing/userRoutes");
 
 const paymentRoutes = require("./Routing/PaymentRoutes");
@@ -152,6 +154,7 @@ async function startServer() {
     await pool.query("SELECT 1");
     app.listen(PORT, () => {
       startPhonePeWebhookWorker();
+      startCommissionWorker();
       console.log(`Server running on port ${PORT}`);
     });
   } catch (error) {

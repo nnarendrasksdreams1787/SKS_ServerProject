@@ -320,7 +320,9 @@ async function createPendingPaymentOrder({
        WHERE tenant_id = ?
          AND user_id = ?
          AND status = 'active'
-       LIMIT 1`,
+       LIMIT 1
+        FOR UPDATE
+       `,
       [tenantId, userId],
     );
 
@@ -329,6 +331,43 @@ async function createPendingPaymentOrder({
     }
 
     const sponsorId = users[0].sponsor_id || null;
+
+    // Freeze the complete referral chain at checkout.
+    const sponsorChain = [];
+    const visited = new Set([String(userId)]);
+
+    let nextSponsorId = sponsorId;
+
+    while (nextSponsorId != null) {
+      const sponsorKey = String(nextSponsorId);
+
+      if (visited.has(sponsorKey)) {
+        throw new Error("Referral cycle detected");
+      }
+
+      visited.add(sponsorKey);
+
+      const [sponsors] = await connection.execute(
+        `SELECT user_id, sponsor_id
+     FROM users
+     WHERE tenant_id = ?
+       AND user_id = ?
+     LIMIT 1
+     FOR UPDATE`,
+        [tenantId, nextSponsorId],
+      );
+
+      if (sponsors.length !== 1) {
+        throw new Error("Broken sponsor chain");
+      }
+
+      const sponsor = sponsors[0];
+
+      sponsorChain.push(sponsor.user_id);
+      nextSponsorId = sponsor.sponsor_id;
+    }
+
+    const sponsorChainSnapshot = JSON.stringify(sponsorChain);
 
     // 2. Read actual product price from database.
     const [products] = await connection.execute(
@@ -392,7 +431,6 @@ async function createPendingPaymentOrder({
     //   100n,
     // );
 
-    
     if (taxBasisPoints > 10000n) {
       throw new Error("Invalid product tax percentage");
     }
@@ -464,7 +502,27 @@ async function createPendingPaymentOrder({
     // }
 
     // 5. Create order reference.
+
     const orderReference = "SKS_" + crypto.randomUUID().replace(/-/g, "");
+
+    // Snapshot active commission rules at checkout.
+    const [commissionRules] = await connection.execute(
+      `SELECT level, commission_percent
+   FROM product_referral_rules
+   WHERE tenant_id = ?
+     AND product_id = ?
+     AND is_active = 1
+   ORDER BY level ASC
+   FOR UPDATE`,
+      [tenantId, productId],
+    );
+
+    const commissionRulesSnapshot = JSON.stringify(
+      commissionRules.map((rule) => ({
+        level: Number(rule.level),
+        commission_percent: Number(rule.commission_percent),
+      })),
+    );
 
     // 6. Save pending order.
     const [orderResult] = await connection.execute(
@@ -532,13 +590,33 @@ async function createPendingPaymentOrder({
     //   [orderResult.insertId, providerCode, Number(amountPaise)],
     // );
 
+    // await connection.execute(
+    //   `INSERT INTO order_items (
+    //      tenant_id, order_id, product_id,
+    //      product_title_snapshot, quantity,
+    //      unit_price, discount_amount,
+    //      tax_amount, line_total
+    //    ) VALUES (?, ?, ?, ?, 1, ?, '0.00', ?, ?)`,
+    //   [
+    //     tenantId,
+    //     orderId,
+    //     productId,
+    //     product.title,
+    //     toRupees(subtotalPaise),
+    //     toRupees(taxPaise),
+    //     toRupees(amountPaise),
+    //   ],
+    // );
+
     await connection.execute(
       `INSERT INTO order_items (
-         tenant_id, order_id, product_id,
-         product_title_snapshot, quantity,
-         unit_price, discount_amount,
-         tax_amount, line_total
-       ) VALUES (?, ?, ?, ?, 1, ?, '0.00', ?, ?)`,
+     tenant_id, order_id, product_id,
+     product_title_snapshot, quantity,
+     unit_price, discount_amount,
+     tax_amount, line_total,
+     commission_rules_snapshot,
+     sponsor_chain_snapshot
+   ) VALUES (?, ?, ?, ?, 1, ?, '0.00', ?, ?, ?, ?)`,
       [
         tenantId,
         orderId,
@@ -547,6 +625,8 @@ async function createPendingPaymentOrder({
         toRupees(subtotalPaise),
         toRupees(taxPaise),
         toRupees(amountPaise),
+        commissionRulesSnapshot,
+        sponsorChainSnapshot,
       ],
     );
 
@@ -773,13 +853,15 @@ async function claimPaymentInitiation({ userId, tenantId, orderReference }) {
     const order = orders[0];
 
     if (
-      order.gateway !== "phonepe" ||
+      // order.gateway !== "phonepe" ||
+      !["phonepe", "mswipe"].includes(order.gateway) ||
       order.payment_environment !== "test" ||
       order.order_status !== "pending" ||
       order.payment_status !== "initiated" ||
       order.initiation_status !== "created"
     ) {
-      const error = new Error("Order cannot initiate PhonePe payment");
+      // const error = new Error("Order cannot initiate PhonePe payment");
+      const error = new Error("Order cannot initiate payment");
       error.statusCode = 409;
       throw error;
     }
@@ -790,11 +872,12 @@ async function claimPaymentInitiation({ userId, tenantId, orderReference }) {
       SET initiation_status = 'initiating'
       WHERE tenant_id = ?
         AND payment_id = ?
-        AND gateway = 'phonepe'
+        AND gateway = ?
         AND status = 'initiated'
         AND initiation_status = 'created'
       `,
-      [tenantId, order.payment_id],
+      // [tenantId, order.payment_id],
+      [tenantId, order.payment_id, order.gateway],
     );
 
     if (result.affectedRows !== 1) {
@@ -899,7 +982,7 @@ async function updatePaymentInitiationStatus({ paymentOrderId, status }) {
     SET initiation_status = ?
     WHERE tenant_id = ?
       AND order_id = ?
-      AND gateway = 'phonepe'
+      AND gateway IN ('phonepe', 'mswipe')
       AND status = 'initiated'
       AND initiation_status = 'initiating'
     `,
@@ -968,6 +1051,8 @@ async function getCustomerPaymentOrder({ userId, tenantId, orderReference }) {
       o.status AS order_status,
 
       p.gateway AS provider_code,
+      p.gateway_order_id,
+      p.gateway_txn_id,
       p.status AS transaction_status,
       p.initiation_status,
 
@@ -1981,6 +2066,104 @@ async function getPaymentInitiationRecoveryState({
   return rows[0];
 }
 
+async function getMswipeCheckoutCustomer({ userId, tenantId, orderReference }) {
+  const [rows] = await pool.execute(
+    `
+    SELECT
+      u.user_id,
+      u.full_name,
+      u.email,
+      u.mobile
+    FROM orders o
+    INNER JOIN users u
+      ON u.tenant_id = o.tenant_id
+     AND u.user_id = o.user_id
+    INNER JOIN payments p
+      ON p.tenant_id = o.tenant_id
+     AND p.order_id = o.order_id
+    WHERE o.tenant_id = ?
+      AND o.user_id = ?
+      AND o.order_number = ?
+      AND p.gateway = 'mswipe'
+      AND o.status = 'pending'
+      
+    LIMIT 2
+    `,
+    [tenantId, userId, orderReference],
+  );
+
+  if (rows.length !== 1) {
+    const error = new Error("Mswipe checkout customer not found");
+    error.statusCode = 409;
+    throw error;
+  }
+
+  const customer = rows[0];
+
+  if (
+    typeof customer.email !== "string" ||
+    !customer.email.trim() ||
+    !/^\d{10}$/.test(String(customer.mobile || "").trim())
+  ) {
+    const error = new Error(
+      "Customer email or mobile number is missing or invalid",
+    );
+    error.statusCode = 422;
+    throw error;
+  }
+
+  return {
+    userId: customer.user_id,
+    name: customer.full_name,
+    email: customer.email.trim(),
+    mobile: String(customer.mobile).trim(),
+  };
+}
+
+async function saveMswipePaymentReferences({
+  paymentOrderId,
+  gatewayOrderId,
+  gatewayTransactionId,
+}) {
+  if (
+    !Number.isSafeInteger(Number(paymentOrderId)) ||
+    Number(paymentOrderId) <= 0 ||
+    typeof gatewayOrderId !== "string" ||
+    !gatewayOrderId ||
+    gatewayOrderId.length > 150 ||
+    typeof gatewayTransactionId !== "string" ||
+    !gatewayTransactionId ||
+    gatewayTransactionId.length > 150
+  ) {
+    throw new Error("Invalid Mswipe payment references");
+  }
+
+  const [result] = await pool.execute(
+    `
+    UPDATE payments
+    SET gateway_order_id = ?,
+        gateway_txn_id = ?
+    WHERE tenant_id = ?
+      AND order_id = ?
+      AND gateway = 'mswipe'
+      AND status = 'initiated'
+      AND initiation_status = 'initiating'
+      AND gateway_order_id IS NULL
+      AND gateway_txn_id IS NULL
+    `,
+    [gatewayOrderId, gatewayTransactionId, TENANT_ID, Number(paymentOrderId)],
+  );
+
+  if (result.affectedRows !== 1) {
+    const error = new Error("Mswipe transaction references could not be saved");
+    error.statusCode = 409;
+    error.requiresReview = true;
+    throw error;
+  }
+
+  return { saved: true };
+}
+
 module.exports = {
   getSelectedGateway,
   getGatewayAvailability,
@@ -1992,4 +2175,6 @@ module.exports = {
   reconcileVerifiedPayment,
   savePaymentWebhookEvent,
   getPaymentInitiationRecoveryState,
+  getMswipeCheckoutCustomer,
+  saveMswipePaymentReferences,
 };

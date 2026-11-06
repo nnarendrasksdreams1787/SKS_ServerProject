@@ -73,8 +73,58 @@ async function prepareSettlement(req, res) {
 
 
 
+async function previewCommissions(req, res) {
+  try {
+    const data =
+      await settlementService.previewOrderCommissions(
+        req.params.paymentOrderId
+      );
+
+    return res.status(200).json({
+      success: true,
+      data
+    });
+  } catch (error) {
+    console.error("COMMISSION_PREVIEW_ERROR", error.message);
+
+    return res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.statusCode
+        ? error.message
+        : "Unable to preview commissions"
+    });
+  }
+}
+
+
+
+async function processCommissions(req, res) {
+  try {
+    const data = await settlementService.processOrderCommissions(
+      req.params.paymentOrderId,
+    );
+
+    return res.status(200).json({
+      success: true,
+      data,
+    });
+  } catch (error) {
+    console.error("COMMISSION_PROCESSING_ERROR", error.message);
+
+    return res.status(error.statusCode || 409).json({
+      success: false,
+      message: error.statusCode
+        ? error.message
+        : "Commission processing failed; transaction rolled back",
+    });
+  }
+}
+
+
 module.exports = {
   listPendingSettlements,
   getSettlement,
   prepareSettlement,
+  previewCommissions,
+  processCommissions,
 };

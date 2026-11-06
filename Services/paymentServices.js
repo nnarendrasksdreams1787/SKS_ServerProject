@@ -592,26 +592,58 @@ async function initiateCommonCheckout({ userId, tenantId, orderReference }) {
 
   const providerCode = order.provider_code;
 
-  if (providerCode === "mswipe") {
-    const error = new Error("Mswipe checkout is not configured yet");
-    error.statusCode = 503;
-    throw error;
-  }
+  // if (providerCode === "mswipe") {
+  //   const error = new Error("Mswipe checkout is not configured yet");
+  //   error.statusCode = 503;
+  //   throw error;
+  // }
 
-  if (providerCode !== "phonepe") {
+  // if (providerCode !== "phonepe") {
+  //   const error = new Error("Unsupported payment gateway");
+  //   error.statusCode = 409;
+  //   throw error;
+  // }
+
+  if (!["phonepe", "mswipe"].includes(providerCode)) {
     const error = new Error("Unsupported payment gateway");
     error.statusCode = 409;
     throw error;
   }
 
+  if (
+    providerCode === "mswipe" &&
+    process.env.MSWIPE_PAYMENT_ENABLED !== "true"
+  ) {
+    const error = new Error("Mswipe checkout is currently disabled");
+    error.statusCode = 503;
+    throw error;
+  }
+
   // Check gateway configuration BEFORE claiming initiation.
   // Disabled configuration must not consume an order attempt.
-  if (process.env.PHONEPE_PAYMENT_ENABLED !== "true") {
+  // if (process.env.PHONEPE_PAYMENT_ENABLED !== "true") {
+  //   const error = new Error("PhonePe checkout is currently disabled");
+  //   error.statusCode = 503;
+  //   throw error;
+  // }
+
+  if (
+    providerCode === "phonepe" &&
+    process.env.PHONEPE_PAYMENT_ENABLED !== "true"
+  ) {
     const error = new Error("PhonePe checkout is currently disabled");
     error.statusCode = 503;
     throw error;
   }
 
+  const mswipeCustomer =
+    providerCode === "mswipe"
+      ? await paymentRepository.getMswipeCheckoutCustomer({
+          userId,
+          tenantId,
+          orderReference,
+        })
+      : null;
   // This repository function atomically changes
   // transaction_status from created to initiating.
   const claimedOrder = await paymentRepository.claimPaymentInitiation({
@@ -627,7 +659,30 @@ async function initiateCommonCheckout({ userId, tenantId, orderReference }) {
       providerCode,
       orderReference: claimedOrder.orderReference,
       amountPaise: claimedOrder.amountPaise,
+      customer: mswipeCustomer,
     });
+
+    if (providerCode === "mswipe") {
+      try {
+        await paymentRepository.saveMswipePaymentReferences({
+          paymentOrderId: claimedOrder.paymentOrderId,
+          gatewayOrderId: checkout.gatewayReference,
+          gatewayTransactionId: checkout.gatewayTransactionId,
+        });
+      } catch (error) {
+        console.error("MSWIPE_REFERENCE_SAVE_FAILED", {
+          orderReference: claimedOrder.orderReference,
+          message: error.message,
+        });
+
+        const syncError = new Error(
+          "Mswipe checkout was created but its references could not be saved. Manual reconciliation required.",
+        );
+        syncError.statusCode = 503;
+        syncError.requiresReview = true;
+        throw syncError;
+      }
+    }
   } catch (error) {
     // Gateway may have accepted the request.
     // Never automatically retry an ambiguous initiation.

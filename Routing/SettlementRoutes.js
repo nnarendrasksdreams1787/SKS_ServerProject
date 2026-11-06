@@ -8,6 +8,8 @@ const {
   listPendingSettlements,
   getSettlement,
   prepareSettlement,
+  previewCommissions,
+  processCommissions,
 } = require("../Controller/settlementController");
 
 settleRoutes.get(
@@ -28,6 +30,19 @@ settleRoutes.post(
   prepareSettlement
 );
 
+
+settleRoutes.get(
+  "/:paymentOrderId/commission-preview",
+  requireAdmin,
+  previewCommissions
+);
+
+
+settleRoutes.post(
+  "/:paymentOrderId/process-commissions",
+  requireAdmin,
+  processCommissions,
+);
 
 
 module.exports = settleRoutes;

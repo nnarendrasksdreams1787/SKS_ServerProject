@@ -784,3 +784,215 @@ exports.deleteProduct = async (req, res) => {
     return handleDatabaseError(error, res, "Unable to delete product");
   }
 };
+
+
+
+
+
+/**
+ * Product-wise dynamic commission configuration
+ * Existing table: product_referral_rules
+ */
+
+exports.getProductCommissions = async (req, res) => {
+  const productId = Number(req.params.id);
+
+  if (!Number.isSafeInteger(productId) || productId <= 0) {
+    return res.status(400).json({ message: "Invalid product ID" });
+  }
+
+  try {
+    const [products] = await pool.execute(
+      `SELECT product_id, title
+       FROM products
+       WHERE tenant_id = ? AND product_id = ?
+       LIMIT 1`,
+      [TENANT_ID, productId]
+    );
+
+    if (!products.length) {
+      return res.status(404).json({ message: "Product not found" });
+    }
+
+    const [rows] = await pool.execute(
+      `SELECT level, commission_percent,
+              buyer_discount_percent, is_active
+       FROM product_referral_rules
+       WHERE tenant_id = ? AND product_id = ?
+       ORDER BY level ASC`,
+      [TENANT_ID, productId]
+    );
+
+    return res.json({
+      product: products[0],
+      active_levels: rows.filter(r => Number(r.is_active) === 1).length,
+      rules: rows.map(r => ({
+        level: Number(r.level),
+        commission_percent: Number(r.commission_percent),
+        buyer_discount_percent: Number(r.buyer_discount_percent),
+        is_active: Boolean(r.is_active)
+      }))
+    });
+  } catch (error) {
+    console.error("GET_PRODUCT_COMMISSIONS_ERROR", error);
+    return res.status(500).json({
+      message: "Unable to load commission settings"
+    });
+  }
+};
+
+exports.updateProductCommissions = async (req, res) => {
+  const productId = Number(req.params.id);
+  const { levels } = req.body || {};
+
+  if (!Number.isSafeInteger(productId) || productId <= 0) {
+    return res.status(400).json({ message: "Invalid product ID" });
+  }
+
+  if (!Array.isArray(levels) || levels.length > 255) {
+    return res.status(400).json({
+      message: "levels must be an array with at most 255 entries"
+    });
+  }
+
+  // Empty array intentionally disables all commission levels.
+  const rates = [];
+
+  for (let i = 0; i < levels.length; i++) {
+    const rule = levels[i];
+
+    if (
+      !rule ||
+      typeof rule !== "object" ||
+      Array.isArray(rule) ||
+      !Number.isInteger(rule.level) ||
+      rule.level !== i + 1 ||
+      typeof rule.commission_percent !== "number" ||
+      !Number.isFinite(rule.commission_percent) ||
+      rule.commission_percent < 0 ||
+      rule.commission_percent > 100 ||
+      Math.round(rule.commission_percent * 100) !==
+        rule.commission_percent * 100
+    ) {
+      return res.status(400).json({
+        message:
+          "Levels must be sequential from 1 with percentages from 0 to 100 (max 2 decimals)"
+      });
+    }
+
+    rates.push(Math.round(rule.commission_percent * 100));
+  }
+
+  const totalBasisPoints = rates.reduce((sum, rate) => sum + rate, 0);
+
+  if (totalBasisPoints > 10000) {
+    return res.status(400).json({
+      message: "Total commission cannot exceed 100%"
+    });
+  }
+
+  let connection;
+
+  try {
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+
+    // Serializes concurrent changes for the same product.
+    const [products] = await connection.execute(
+      `SELECT product_id
+       FROM products
+       WHERE tenant_id = ? AND product_id = ?
+       FOR UPDATE`,
+      [TENANT_ID, productId]
+    );
+
+    if (!products.length) {
+      await connection.rollback();
+      return res.status(404).json({ message: "Product not found" });
+    }
+
+    const [existingRules] = await connection.execute(
+      `SELECT level, commission_percent,
+              buyer_discount_percent, is_active
+       FROM product_referral_rules
+       WHERE tenant_id = ? AND product_id = ?
+       ORDER BY level ASC`,
+      [TENANT_ID, productId]
+    );
+
+    // Preserve existing rows, including buyer discounts.
+    // Disable removed levels instead of deleting historical settings.
+    await connection.execute(
+      `UPDATE product_referral_rules
+       SET is_active = 0
+       WHERE tenant_id = ? AND product_id = ?`,
+      [TENANT_ID, productId]
+    );
+
+    for (let i = 0; i < rates.length; i++) {
+      await connection.execute(
+        `INSERT INTO product_referral_rules
+           (tenant_id, product_id, level,
+            commission_percent, buyer_discount_percent, is_active)
+         VALUES (?, ?, ?, ?, 0, 1)
+         ON DUPLICATE KEY UPDATE
+           commission_percent = VALUES(commission_percent),
+           is_active = 1`,
+        [
+          TENANT_ID,
+          productId,
+          i + 1,
+          (rates[i] / 100).toFixed(2)
+        ]
+      );
+    }
+
+    // Record configuration changes for admin accountability.
+    await connection.execute(
+      `INSERT INTO audit_logs
+         (tenant_id, actor_admin_id, action,
+          entity_type, entity_id, before_data, after_data)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [
+        TENANT_ID,
+        req.admin.id,
+        "PRODUCT_COMMISSIONS_UPDATED",
+        "product",
+        String(productId),
+        JSON.stringify(existingRules),
+        JSON.stringify({
+          levels: levels.map((rule, i) => ({
+            level: i + 1,
+            commission_percent: rates[i] / 100
+          })),
+          total_percent: totalBasisPoints / 100
+        })
+      ]
+    );
+
+    await connection.commit();
+
+    return res.json({
+      message: "Commission settings saved successfully",
+      product_id: productId,
+      active_levels: rates.length,
+      total_percent: totalBasisPoints / 100
+    });
+  } catch (error) {
+    if (connection) {
+      try {
+        await connection.rollback();
+      } catch (rollbackError) {
+        console.error("COMMISSION_ROLLBACK_ERROR", rollbackError);
+      }
+    }
+
+    console.error("UPDATE_PRODUCT_COMMISSIONS_ERROR", error);
+
+    return res.status(500).json({
+      message: "Unable to update commission settings"
+    });
+  } finally {
+    if (connection) connection.release();
+  }
+};

@@ -34,6 +34,8 @@ const getDashboard = async (req, res) => {
       });
     }
 
+    
+
     // 2. Available wallet balance
     const [wallets] = await pool.query(
       `SELECT available_balance

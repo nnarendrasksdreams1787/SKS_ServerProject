@@ -20,6 +20,8 @@ const {
   deleteProduct,
   updateProductCategory,
   updateProductCategoryStatus,
+  updateProductCommissions,
+  getProductCommissions,
 } = require("../Controller/adminProductsController");
 const {
   getReferrals,
@@ -122,6 +124,19 @@ adminRoute.patch(
   "/bank-details/:id/verification",
   requireAdmin,
   updateBankVerification,
+);
+
+
+adminRoute.get(
+  "/products/:id/commissions",
+  requireAdmin,
+  getProductCommissions
+);
+
+adminRoute.put(
+  "/products/:id/commissions",
+  requireAdmin,
+  updateProductCommissions
 );
 
 module.exports = adminRoute;
