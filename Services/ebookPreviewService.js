@@ -2,7 +2,7 @@ const fs = require("node:fs/promises");
 const { PDFDocument } = require("pdf-lib");
 const { resolveEbookPath } = require("./ebookStorage");
 
-const PREVIEW_PAGE_LIMIT = 5;
+const PREVIEW_PAGE_LIMIT = 8;
 
 async function createBookPreview(storageKey) {
   const filePath = resolveEbookPath(storageKey);
