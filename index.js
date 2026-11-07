@@ -8,6 +8,7 @@ const MySQLStoreFactory = require("express-mysql-session");
 const authRoute = require("./Routing/authRoutes");
 const adminRoute = require("./Routing/adminRoutes");
 const PORT = process.env.PORT || 4010;
+const chantTTSRoutes = require("./Routing/ChantTTSRoutes");
 
 const { startCommissionWorker } = require("./Services/commissionWorker");
 
@@ -110,6 +111,8 @@ app.use("/api/payments", paymentRoutes);
 app.use("/api/settlements", settleRoutes);
 
 app.use("/api/library", bookAccRoutes);
+
+app.use("/api/chant-tts", chantTTSRoutes);
 
 app.get("/api/products", async (req, res) => {
   try {
