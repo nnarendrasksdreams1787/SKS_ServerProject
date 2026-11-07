@@ -176,9 +176,17 @@ app.get("/api/products", async (req, res) => {
      p.author,
      c.name AS category,
      p.price,
-     p.cover_image_key,
-     p.ebook_storage_key,
-     p.docx_storage_key
+    p.cover_image_key,
+CASE
+  WHEN p.ebook_storage_key IS NOT NULL
+       AND p.ebook_storage_key != ''
+  THEN 1 ELSE 0
+END AS hasPdf,
+CASE
+  WHEN p.docx_storage_key IS NOT NULL
+       AND p.docx_storage_key != ''
+  THEN 1 ELSE 0
+END AS hasDocx
    FROM products p
    INNER JOIN categories c
      ON c.category_id = p.category_id
@@ -198,6 +206,75 @@ app.get("/api/products", async (req, res) => {
     console.error("Public products error:", error.message);
     res.status(500).json({
       message: "Unable to load products",
+    });
+  }
+});
+
+// Public single product details - no authentication required
+app.get("/api/products/:id", async (req, res) => {
+  try {
+    const productId = Number(req.params.id);
+
+    if (!Number.isSafeInteger(productId) || productId <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid product ID",
+      });
+    }
+
+    const [rows] = await pool.execute(
+      `SELECT
+         p.product_id AS id,
+         p.title AS name,
+         p.slug,
+         p.description,
+         p.author,
+         c.name AS category,
+         p.price,
+         p.cover_image_key,
+         CASE
+           WHEN p.ebook_storage_key IS NOT NULL
+                AND p.ebook_storage_key != ''
+           THEN 1 ELSE 0
+         END AS hasPdf,
+         CASE
+           WHEN p.docx_storage_key IS NOT NULL
+                AND p.docx_storage_key != ''
+           THEN 1 ELSE 0
+         END AS hasDocx
+       FROM products p
+       INNER JOIN categories c
+         ON c.category_id = p.category_id
+        AND c.tenant_id = p.tenant_id
+       WHERE p.tenant_id = ?
+         AND p.product_id = ?
+         AND p.is_active = 1
+       LIMIT 1`,
+      [1, productId],
+    );
+
+    if (!rows.length) {
+      return res.status(404).json({
+        success: false,
+        message: "Product not found",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      product: {
+        ...rows[0],
+        price: Number(rows[0].price),
+        hasPdf: Boolean(rows[0].hasPdf),
+        hasDocx: Boolean(rows[0].hasDocx),
+      },
+    });
+  } catch (error) {
+    console.error("Public product details error:", error.message);
+
+    return res.status(500).json({
+      success: false,
+      message: "Unable to load product details",
     });
   }
 });

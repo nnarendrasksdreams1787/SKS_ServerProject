@@ -3,3 +3,24 @@
 !.env.example
 node_modules/
 certs/
+
+
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Ignore all ZIP archives
+*.zip
+*.ZIP
+
+# Ignore compressed backup files
+*.7z
+*.rar
+*.tar
+*.gz
+
+# Ignore project backup folders
+backup/
+backups/
