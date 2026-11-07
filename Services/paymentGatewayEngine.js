@@ -80,7 +80,10 @@ async function initiateGatewayPayment({
   const result = await service.createPayment({
     orderReference,
     amountPaise,
-     ...(providerCode === "mswipe" ? { customer } : {}),
+    //  ...(providerCode === "mswipe" ? { customer } : {}),
+    ...(String(providerCode).trim().toLowerCase() === "mswipe"
+      ? { customer }
+      : {}),
   });
 
   if (!result || typeof result.checkoutUrl !== "string") {
@@ -108,16 +111,46 @@ async function initiateGatewayPayment({
   return result;
 }
 
-async function verifyGatewayPayment({ providerCode, orderReference }) {
-  const service = getGatewayService(providerCode);
+async function verifyGatewayPayment({
+  providerCode,
+  orderReference,
+  gatewayReference,
+}) {
+  const provider = String(providerCode || "")
+    .trim()
+    .toLowerCase();
+  const service = getGatewayService(provider);
 
   if (typeof service.verifyPayment !== "function") {
     throw new Error("Gateway verification is not configured");
   }
 
-  return service.verifyPayment({
-    orderReference,
-  });
+  if (provider === "mswipe") {
+    if (
+      typeof gatewayReference !== "string" ||
+      !gatewayReference.trim() ||
+      gatewayReference.length > 150
+    ) {
+      const error = new Error("Missing Mswipe transaction reference");
+      error.statusCode = 409;
+      throw error;
+    }
+
+    return service.verifyPayment({
+      gatewayReference: gatewayReference.trim(),
+    });
+  }
+
+  if (
+    typeof orderReference !== "string" ||
+    !/^SKS_[a-f0-9]{32}$/.test(orderReference)
+  ) {
+    const error = new Error("Invalid payment order reference");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  return service.verifyPayment({ orderReference });
 }
 
 module.exports = {

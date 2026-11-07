@@ -33,14 +33,56 @@ if (isProduction) {
   app.set("trust proxy", 1);
 }
 
-if (process.env.FRONTEND_URL) {
-  app.use(
-    cors({
-      origin: process.env.FRONTEND_URL,
-      credentials: true,
-    }),
-  );
-}
+// if (process.env.FRONTEND_URL) {
+//   app.use(
+//     cors({
+//       origin: process.env.FRONTEND_URL,
+//       credentials: true,
+//     }),
+//   );
+// }
+
+
+
+const allowedOrigins = (
+  process.env.FRONTEND_URLS ||
+  process.env.FRONTEND_URL ||
+  ""
+)
+  .split(",")
+  .map((url) => url.trim().replace(/\/+$/, ""))
+  .filter(Boolean);
+
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      // Allow server-to-server and non-browser requests.
+      if (!origin || allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+
+      console.warn("CORS blocked origin:", origin);
+      return callback(null, false);
+    },
+
+    credentials: true,
+
+    methods: [
+      "GET",
+      "POST",
+      "PUT",
+      "PATCH",
+      "DELETE",
+      "OPTIONS",
+    ],
+
+    allowedHeaders: [
+      "Content-Type",
+      "Authorization",
+    ],
+  })
+);
+
 
 app.use(
   express.json({

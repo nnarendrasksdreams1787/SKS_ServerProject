@@ -75,6 +75,18 @@ async function saveSelectedGateway(providerCode, environment = "test") {
   validateProvider(providerCode);
   validateEnvironment(environment);
 
+  const { getGatewayReadiness } = require("./paymentGatewayReadiness");
+
+  const readiness = getGatewayReadiness(providerCode, environment);
+
+  if (!readiness.ready) {
+    const error = new Error(
+      "Selected gateway is not ready for payment processing",
+    );
+    error.statusCode = 409;
+    throw error;
+  }
+
   const connection = await pool.getConnection();
 
   try {
@@ -637,7 +649,13 @@ async function createPendingPaymentOrder({
          status, initiation_status
        ) VALUES (?, ?, ?, ?, ?, 'INR',
                  'initiated', 'created')`,
-      [tenantId, orderId, providerCode, orderReference, toRupees(amountPaise)],
+      [
+        tenantId,
+        orderId,
+        providerCode,
+        providerCode === "mswipe" ? null : orderReference,
+        toRupees(amountPaise),
+      ],
     );
 
     await connection.commit();
@@ -1133,6 +1151,9 @@ async function getCustomerPaymentOrder({ userId, tenantId, orderReference }) {
     currency: order.currency,
     provider_code: order.provider_code,
     environment: order.environment,
+    gateway_order_id: order.gateway_order_id,
+    gateway_txn_id: order.gateway_txn_id,
+    transaction_status: order.transaction_status,
     payment_status: order.payment_status,
     settlement_status: order.settlement_status,
     access_status: order.access_status,
@@ -2072,7 +2093,7 @@ async function getMswipeCheckoutCustomer({ userId, tenantId, orderReference }) {
     SELECT
       u.user_id,
       u.full_name,
-      u.email,
+      u.reference_id,
       u.mobile
     FROM orders o
     INNER JOIN users u
@@ -2101,12 +2122,12 @@ async function getMswipeCheckoutCustomer({ userId, tenantId, orderReference }) {
   const customer = rows[0];
 
   if (
-    typeof customer.email !== "string" ||
-    !customer.email.trim() ||
+    typeof customer.reference_id !== "string" ||
+    !customer.reference_id.trim() ||
     !/^\d{10}$/.test(String(customer.mobile || "").trim())
   ) {
     const error = new Error(
-      "Customer email or mobile number is missing or invalid",
+      "Customer reference ID or mobile number is missing or invalid",
     );
     error.statusCode = 422;
     throw error;
@@ -2114,8 +2135,8 @@ async function getMswipeCheckoutCustomer({ userId, tenantId, orderReference }) {
 
   return {
     userId: customer.user_id,
+    referenceId: customer.reference_id.trim(),
     name: customer.full_name,
-    email: customer.email.trim(),
     mobile: String(customer.mobile).trim(),
   };
 }

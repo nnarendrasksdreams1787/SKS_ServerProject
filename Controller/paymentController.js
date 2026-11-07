@@ -11,6 +11,8 @@ const {
   reconcilePhonePeCheckout,
   initiateCommonCheckout,
   recoverPhonePeInitiation,
+  reconcileCommonCheckout,
+  recoverCommonInitiation,
 } = require("../Services/paymentServices");
 
 // const GATEWAYS = Object.freeze({
@@ -196,7 +198,8 @@ async function verifyPaymentStatus(req, res) {
   try {
     const { orderReference } = req.params;
 
-    const result = await verifyPhonePeCheckout({
+    // const result = await verifyPhonePeCheckout({
+    const result = await verifyCommonCheckout({
       userId: Number(req.user.userId),
       tenantId: Number(req.user.tenantId),
       orderReference,
@@ -222,7 +225,8 @@ async function reconcilePaymentStatus(req, res) {
   try {
     const { orderReference } = req.params;
 
-    const result = await reconcilePhonePeCheckout({
+    // const result = await reconcilePhonePeCheckout({
+    const result = await reconcileCommonCheckout({
       userId: Number(req.user.userId),
       tenantId: Number(req.user.tenantId),
       orderReference,
@@ -244,9 +248,6 @@ async function reconcilePaymentStatus(req, res) {
   }
 }
 
-
-
-
 async function initiateCommonPayment(req, res) {
   try {
     const { orderReference } = req.body;
@@ -263,19 +264,17 @@ async function initiateCommonPayment(req, res) {
 
     return res.status(error.statusCode || 500).json({
       success: false,
-      message: error.statusCode
-        ? error.message
-        : "Unable to initiate payment",
+      message: error.statusCode ? error.message : "Unable to initiate payment",
     });
   }
 }
-
 
 async function recoverPaymentInitiation(req, res) {
   try {
     const { orderReference } = req.params;
 
-    const result = await recoverPhonePeInitiation({
+    // const result = await recoverPhonePeInitiation({
+    const result = await recoverCommonInitiation({
       userId: Number(req.user.userId),
       tenantId: Number(req.user.tenantId),
       orderReference,
@@ -296,7 +295,6 @@ async function recoverPaymentInitiation(req, res) {
     });
   }
 }
-
 
 module.exports = {
   paymentHealth,

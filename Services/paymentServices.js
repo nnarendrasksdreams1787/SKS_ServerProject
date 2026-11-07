@@ -466,6 +466,79 @@ async function reconcilePhonePeCheckout({ userId, tenantId, orderReference }) {
   });
 }
 
+async function verifyCommonCheckout({ userId, tenantId, orderReference }) {
+  if (
+    typeof orderReference !== "string" ||
+    !/^SKS_[a-f0-9]{32}$/.test(orderReference)
+  ) {
+    const error = new Error("Invalid order reference");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const order = await paymentRepository.getCustomerPaymentOrder({
+    userId,
+    tenantId,
+    orderReference,
+  });
+
+  if (order.provider_code === "phonepe") {
+    return verifyPhonePeCheckout({
+      userId,
+      tenantId,
+      orderReference,
+    });
+  }
+
+  if (order.provider_code !== "mswipe") {
+    const error = new Error("Unsupported payment gateway");
+    error.statusCode = 409;
+    throw error;
+  }
+
+  if (
+    order.environment !== "test" ||
+    process.env.MSWIPE_PAYMENT_ENABLED !== "true"
+  ) {
+    const error = new Error("Mswipe UAT verification is disabled");
+    error.statusCode = 503;
+    throw error;
+  }
+
+  if (
+    typeof order.gateway_order_id !== "string" ||
+    !order.gateway_order_id.trim()
+  ) {
+    const error = new Error("Mswipe gateway reference missing");
+    error.statusCode = 409;
+    throw error;
+  }
+
+  const verification = await paymentGatewayEngine.verifyGatewayPayment({
+    providerCode: "mswipe",
+    orderReference,
+    gatewayReference: order.gateway_order_id,
+  });
+
+  // Never report a mismatched gateway order as verified.
+  if (verification.orderReference !== orderReference) {
+    const error = new Error("Mswipe order identity mismatch");
+    error.statusCode = 409;
+    throw error;
+  }
+
+  return {
+    orderReference,
+    providerCode: "mswipe",
+    gatewayState: verification.gatewayState,
+    gatewayVerified: true,
+    recordedPaymentStatus: order.payment_status,
+    settlementStatus: order.settlement_status,
+    accessStatus: order.access_status,
+    message: "Gateway status retrieved; reconciliation pending",
+  };
+}
+
 // async function initiateCommonCheckout({ userId, tenantId, orderReference }) {
 //   if (
 //     typeof orderReference !== "string" ||
@@ -874,6 +947,97 @@ async function recoverPhonePeInitiation({ userId, tenantId, orderReference }) {
   };
 }
 
+async function reconcileCommonCheckout({ userId, tenantId, orderReference }) {
+  const order = await paymentRepository.getCustomerPaymentOrder({
+    userId,
+    tenantId,
+    orderReference,
+  });
+
+  if (order.provider_code === "phonepe") {
+    return reconcilePhonePeCheckout({
+      userId,
+      tenantId,
+      orderReference,
+    });
+  }
+
+  if (order.provider_code !== "mswipe") {
+    const error = new Error("Unsupported payment gateway");
+    error.statusCode = 409;
+    throw error;
+  }
+
+  const result = await verifyCommonCheckout({
+    userId,
+    tenantId,
+    orderReference,
+  });
+
+  return {
+    ...result,
+    requiresReview: result.gatewayState === "COMPLETED",
+    reconciliationPending: true,
+    message:
+      result.gatewayState === "COMPLETED"
+        ? "Mswipe reported success; amount and transaction identity validation pending"
+        : "Mswipe payment is not finalized",
+  };
+}
+
+async function recoverCommonInitiation({ userId, tenantId, orderReference }) {
+  const order = await paymentRepository.getCustomerPaymentOrder({
+    userId,
+    tenantId,
+    orderReference,
+  });
+
+  if (order.provider_code === "phonepe") {
+    return recoverPhonePeInitiation({
+      userId,
+      tenantId,
+      orderReference,
+    });
+  }
+
+  if (order.provider_code !== "mswipe") {
+    const error = new Error("Unsupported payment gateway");
+    error.statusCode = 409;
+    throw error;
+  }
+
+  if (order.payment_status !== "pending") {
+    return {
+      orderReference,
+      paymentStatus: order.payment_status,
+      recoveryStatus: "already_finalized",
+    };
+  }
+
+  if (!order.gateway_order_id) {
+    return {
+      orderReference,
+      recoveryStatus: "manual_review",
+      message:
+        "Mswipe transaction reference unavailable. Do not initiate another payment.",
+    };
+  }
+
+  const result = await verifyCommonCheckout({
+    userId,
+    tenantId,
+    orderReference,
+  });
+
+  return {
+    ...result,
+    recoveryStatus:
+      result.gatewayState === "PENDING"
+        ? "awaiting_gateway_result"
+        : "verification_requires_reconciliation",
+  };
+}
+
 module.exports = {
   getAvailableGateways,
   resolveGatewayService,
@@ -885,4 +1049,7 @@ module.exports = {
   reconcilePhonePeCheckout,
   initiateCommonCheckout,
   recoverPhonePeInitiation,
+  verifyCommonCheckout,
+  reconcileCommonCheckout,
+  recoverCommonInitiation,
 };

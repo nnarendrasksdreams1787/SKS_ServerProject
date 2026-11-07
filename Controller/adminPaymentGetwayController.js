@@ -5,6 +5,11 @@ const {
   updateSelectedPaymentGateway,
 } = require("../Services/paymentServices");
 
+const mswipeService = require("../Services/mswipeService");
+const phonepeService = require("../Services/phonepeService");
+
+const { getGatewayReadiness } = require("../Services/paymentGatewayReadiness");
+
 const TENANT_ID = 1;
 
 // GET /api/admin/payment-gateways
@@ -71,15 +76,35 @@ exports.getPaymentGateways = async (req, res) => {
         enabledGateways: Number(summary.enabled_gateways),
         configuredGateways: Number(summary.configured_gateways),
       },
-      gateways: providers.map((provider) => ({
-        ...provider,
-        is_default: Boolean(provider.is_default),
-        is_enabled: Boolean(provider.is_enabled),
-        is_configured: Boolean(provider.is_configured),
-        config_json: provider.config_json
-          ? JSON.parse(provider.config_json)
-          : {},
-      })),
+      // gateways: providers.map((provider) => ({
+      //   ...provider,
+      //   is_default: Boolean(provider.is_default),
+      //   is_enabled: Boolean(provider.is_enabled),
+      //   is_configured: Boolean(provider.is_configured),
+      //   config_json: provider.config_json
+      //     ? JSON.parse(provider.config_json)
+      //     : {},
+      // })),
+
+      gateways: providers.map((provider) => {
+        const readiness = getGatewayReadiness(
+          provider.provider_code,
+          provider.environment,
+        );
+
+        return {
+          provider_id: provider.provider_id,
+          provider_code: provider.provider_code,
+          provider_name: provider.provider_name,
+          provider_status: provider.provider_status,
+          is_default: Boolean(provider.is_default),
+          gateway_config_id: provider.gateway_config_id,
+          environment: provider.environment,
+          is_enabled: Boolean(provider.is_enabled),
+          is_configured: readiness.configured,
+          payment_ready: readiness.ready,
+        };
+      }),
     });
   } catch (error) {
     console.error("Payment Gateway API error:", error.message);
@@ -198,11 +223,32 @@ exports.updateGatewayEnabled = async (req, res) => {
 
     // COD does not require online gateway credentials.
     // Other providers must be configured securely before enabling.
-    if (enabled && provider.provider_code !== "cod") {
-      return res.status(409).json({
-        message:
-          "This provider cannot be enabled until secure credential configuration and validation are implemented.",
-      });
+    // if (enabled && provider.provider_code !== "cod") {
+    //   return res.status(409).json({
+    //     message:
+    //       "This provider cannot be enabled until secure credential configuration and validation are implemented.",
+    //   });
+    // }
+
+    if (enabled) {
+      const readiness = getGatewayReadiness(
+        provider.provider_code,
+        environment,
+      );
+
+      if (!readiness.configured) {
+        return res.status(409).json({
+          success: false,
+          message: readiness.reason || "Gateway configuration incomplete",
+        });
+      }
+
+      if (provider.provider_code === "mswipe" && !readiness.ready) {
+        return res.status(409).json({
+          success: false,
+          message: "Mswipe payment processing is disabled pending UAT",
+        });
+      }
     }
 
     const [existing] = await pool.execute(

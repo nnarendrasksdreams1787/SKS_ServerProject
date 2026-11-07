@@ -86,13 +86,24 @@ async function createPayment({ orderReference, amountPaise, customer }) {
     throw new Error("Invalid Mswipe payment amount");
   }
 
+  // if (
+  //   !customer ||
+  //   !/^\d{10}$/.test(String(customer.mobile || "")) ||
+  //   typeof customer.email !== "string" ||
+  //   !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customer.email)
+  // ) {
+  //   throw new Error("Valid Mswipe customer details are required");
+  // }
+
   if (
     !customer ||
-    !/^\d{10}$/.test(String(customer.mobile || "")) ||
-    typeof customer.email !== "string" ||
-    !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customer.email)
+    typeof customer.referenceId !== "string" ||
+    !customer.referenceId.trim() ||
+    !/^\d{10}$/.test(String(customer.mobile || "").trim())
   ) {
-    throw new Error("Valid Mswipe customer details are required");
+    throw new Error(
+      "Valid Mswipe customer reference ID and mobile are required",
+    );
   }
 
   const token = await generateMswipeToken();
@@ -111,7 +122,7 @@ async function createPayment({ orderReference, amountPaise, customer }) {
       user_id: config.userId,
       sessiontoken: token,
       versionno: "VER4.0.0",
-      email_id: customer.email,
+
       invoice_id: orderReference,
       request_id: requestId,
       redirect_url: process.env.MSWIPE_REDIRECT_URL || "",
@@ -131,6 +142,16 @@ async function createPayment({ orderReference, amountPaise, customer }) {
   }
 
   const data = await response.json();
+
+  console.log("MSWIPE_UAT_PAYMENT_RESPONSE", {
+    httpStatus: response.status,
+    status: data?.status,
+    responsecode: data?.responsecode,
+    responsemessage: data?.responsemessage,
+    messageContent: data?.MessageContent,
+    hasPaymentLink: typeof data?.smslink === "string" && !!data.smslink,
+    responseKeys: Object.keys(data || {}),
+  });
 
   if (
     String(data.status).toLowerCase() !== "true" ||
@@ -208,6 +229,31 @@ async function verifyPayment({ gatewayReference }) {
 
   const txn = data.Data[0];
 
+  if (!txn || typeof txn !== "object" || Array.isArray(txn)) {
+    const error = new Error("Invalid Mswipe transaction details");
+    error.statusCode = 409;
+    throw error;
+  }
+
+  const verifiedOrderReference = String(txn.Order_Id || "").trim();
+
+  if (!/^SKS_[a-f0-9]{32}$/.test(verifiedOrderReference)) {
+    const error = new Error("Invalid Mswipe order identity");
+    error.statusCode = 409;
+    throw error;
+  }
+
+  const verifiedTransactionId = String(txn.IPG_ID || "").trim();
+
+  if (
+    verifiedTransactionId.length > 150 ||
+    (Number(txn.Payment_Status) === 1 && !verifiedTransactionId)
+  ) {
+    const error = new Error("Invalid Mswipe transaction identity");
+    error.statusCode = 409;
+    throw error;
+  }
+
   const paymentStatus = Number(txn.Payment_Status);
 
   const gatewayState =
@@ -218,6 +264,13 @@ async function verifyPayment({ gatewayReference }) {
         : paymentStatus === 0
           ? "FAILED"
           : "UNKNOWN";
+
+  if (gatewayState === "UNKNOWN") {
+    const error = new Error("Unsupported Mswipe payment status");
+    error.statusCode = 409;
+    throw error;
+  }
+
   return {
     providerCode: "mswipe",
     gatewayState,
