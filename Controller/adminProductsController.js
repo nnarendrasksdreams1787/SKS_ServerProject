@@ -6,6 +6,13 @@ const {
   deleteDocx,
 } = require("../Services/ebookStorage");
 
+const {
+  saveProductImage,
+  deleteProductImage,
+  resolveProductImagePath,
+  getProductImageContentType,
+} = require("../Services/productImageStorage");
+
 const TENANT_ID = 1;
 
 function slugify(value) {
@@ -99,6 +106,7 @@ exports.getProductCategories = async (req, res) => {
 exports.createProduct = async (req, res) => {
   let savedStorageKey = null;
   let savedDocxKey = null;
+  let savedImageKey = null;
 
   try {
     const {
@@ -110,7 +118,7 @@ exports.createProduct = async (req, res) => {
       description = null,
       author = null,
       tax_percent = 0,
-      cover_image_key = null,
+      // cover_image_key = null,
       //   ebook_storage_key,
     } = req.body;
 
@@ -173,6 +181,7 @@ exports.createProduct = async (req, res) => {
 
     const pdfFile = req.files?.ebook?.[0];
     const docxFile = req.files?.docx?.[0];
+    const imageFile = req.files?.coverImage?.[0];
 
     if (!pdfFile || !docxFile) {
       return res.status(400).json({
@@ -199,6 +208,9 @@ exports.createProduct = async (req, res) => {
 
     savedStorageKey = await saveEbook(pdfFile);
     savedDocxKey = await saveDocx(docxFile);
+    if (imageFile) {
+      savedImageKey = await saveProductImage(imageFile);
+    }
 
     // Save the PDF privately; never accept its storage key from the client.
 
@@ -218,8 +230,9 @@ exports.createProduct = async (req, res) => {
         productPrice,
         productStock,
         taxPercent,
-        cover_image_key || null,
+        // cover_image_key || null,
         // ebook_storage_key.trim(),
+        savedImageKey,
         savedStorageKey,
         savedDocxKey,
         status === "Active" ? 1 : 0,
@@ -256,6 +269,14 @@ exports.createProduct = async (req, res) => {
       }
     }
 
+    if (savedImageKey) {
+      try {
+        await deleteProductImage(savedImageKey);
+      } catch (cleanupError) {
+        console.error("Product image cleanup failed:", cleanupError.message);
+      }
+    }
+
     return handleDatabaseError(error, res, "Unable to create product");
   }
 };
@@ -266,6 +287,8 @@ exports.updateProduct = async (req, res) => {
   let oldStorageKey = null;
   let newDocxKey = null;
   let oldDocxKey = null;
+  let newImageKey = null;
+  let oldImageKey = null;
 
   try {
     const productId = req.params.id;
@@ -278,7 +301,7 @@ exports.updateProduct = async (req, res) => {
       description = null,
       author = null,
       tax_percent = 0,
-      cover_image_key = null,
+      // cover_image_key = null,
       //   ebook_storage_key,
     } = req.body;
 
@@ -320,10 +343,10 @@ exports.updateProduct = async (req, res) => {
     }
 
     const [existingRows] = await pool.execute(
-      `SELECT ebook_storage_key, docx_storage_key
-       FROM products
-       WHERE product_id = ? AND tenant_id = ?
-       LIMIT 1`,
+      `SELECT ebook_storage_key, docx_storage_key, cover_image_key
+   FROM products
+   WHERE product_id = ? AND tenant_id = ?
+   LIMIT 1`,
       [productId, TENANT_ID],
     );
 
@@ -333,6 +356,7 @@ exports.updateProduct = async (req, res) => {
 
     oldStorageKey = existingRows[0].ebook_storage_key;
     oldDocxKey = existingRows[0].docx_storage_key;
+    oldImageKey = existingRows[0].cover_image_key;
 
     const [categories] = await pool.execute(
       `SELECT category_id
@@ -356,6 +380,7 @@ exports.updateProduct = async (req, res) => {
 
     const pdfFile = req.files?.ebook?.[0];
     const docxFile = req.files?.docx?.[0];
+    const imageFile = req.files?.coverImage?.[0];
 
     let storageKey = pdfFile
       ? (newStorageKey = await saveEbook(pdfFile))
@@ -364,6 +389,10 @@ exports.updateProduct = async (req, res) => {
     let docxStorageKey = docxFile
       ? (newDocxKey = await saveDocx(docxFile))
       : oldDocxKey;
+
+    const imageStorageKey = imageFile
+      ? (newImageKey = await saveProductImage(imageFile))
+      : oldImageKey;
 
     if (typeof storageKey !== "string" || !storageKey.trim()) {
       const [existing] = await pool.execute(
@@ -397,7 +426,8 @@ exports.updateProduct = async (req, res) => {
         productPrice,
         productStock,
         taxPercent,
-        cover_image_key,
+        // cover_image_key,
+        imageStorageKey,
         storageKey.trim(),
         docxStorageKey || null,
         status === "Active" ? 1 : 0,
@@ -444,6 +474,28 @@ exports.updateProduct = async (req, res) => {
       }
     }
 
+    // OLD IMAGE CLEANUP
+    if (newImageKey && oldImageKey && oldImageKey !== newImageKey) {
+      try {
+        const [references] = await pool.execute(
+          `SELECT product_id
+       FROM products
+       WHERE cover_image_key = ?
+       LIMIT 1`,
+          [oldImageKey],
+        );
+
+        if (!references.length) {
+          await deleteProductImage(oldImageKey);
+        }
+      } catch (cleanupError) {
+        console.error(
+          "Old product image cleanup failed:",
+          cleanupError.message,
+        );
+      }
+    }
+
     return res.json({ message: "Product updated successfully" });
   } catch (error) {
     if (newStorageKey) {
@@ -459,6 +511,17 @@ exports.updateProduct = async (req, res) => {
         await deleteDocx(newDocxKey);
       } catch (cleanupError) {
         console.error("New DOCX cleanup failed:", cleanupError.message);
+      }
+    }
+
+    if (newImageKey) {
+      try {
+        await deleteProductImage(newImageKey);
+      } catch (cleanupError) {
+        console.error(
+          "New product image cleanup failed:",
+          cleanupError.message,
+        );
       }
     }
 
@@ -785,10 +848,6 @@ exports.deleteProduct = async (req, res) => {
   }
 };
 
-
-
-
-
 /**
  * Product-wise dynamic commission configuration
  * Existing table: product_referral_rules
@@ -807,7 +866,7 @@ exports.getProductCommissions = async (req, res) => {
        FROM products
        WHERE tenant_id = ? AND product_id = ?
        LIMIT 1`,
-      [TENANT_ID, productId]
+      [TENANT_ID, productId],
     );
 
     if (!products.length) {
@@ -820,23 +879,23 @@ exports.getProductCommissions = async (req, res) => {
        FROM product_referral_rules
        WHERE tenant_id = ? AND product_id = ?
        ORDER BY level ASC`,
-      [TENANT_ID, productId]
+      [TENANT_ID, productId],
     );
 
     return res.json({
       product: products[0],
-      active_levels: rows.filter(r => Number(r.is_active) === 1).length,
-      rules: rows.map(r => ({
+      active_levels: rows.filter((r) => Number(r.is_active) === 1).length,
+      rules: rows.map((r) => ({
         level: Number(r.level),
         commission_percent: Number(r.commission_percent),
         buyer_discount_percent: Number(r.buyer_discount_percent),
-        is_active: Boolean(r.is_active)
-      }))
+        is_active: Boolean(r.is_active),
+      })),
     });
   } catch (error) {
     console.error("GET_PRODUCT_COMMISSIONS_ERROR", error);
     return res.status(500).json({
-      message: "Unable to load commission settings"
+      message: "Unable to load commission settings",
     });
   }
 };
@@ -851,7 +910,7 @@ exports.updateProductCommissions = async (req, res) => {
 
   if (!Array.isArray(levels) || levels.length > 255) {
     return res.status(400).json({
-      message: "levels must be an array with at most 255 entries"
+      message: "levels must be an array with at most 255 entries",
     });
   }
 
@@ -876,7 +935,7 @@ exports.updateProductCommissions = async (req, res) => {
     ) {
       return res.status(400).json({
         message:
-          "Levels must be sequential from 1 with percentages from 0 to 100 (max 2 decimals)"
+          "Levels must be sequential from 1 with percentages from 0 to 100 (max 2 decimals)",
       });
     }
 
@@ -887,7 +946,7 @@ exports.updateProductCommissions = async (req, res) => {
 
   if (totalBasisPoints > 10000) {
     return res.status(400).json({
-      message: "Total commission cannot exceed 100%"
+      message: "Total commission cannot exceed 100%",
     });
   }
 
@@ -903,7 +962,7 @@ exports.updateProductCommissions = async (req, res) => {
        FROM products
        WHERE tenant_id = ? AND product_id = ?
        FOR UPDATE`,
-      [TENANT_ID, productId]
+      [TENANT_ID, productId],
     );
 
     if (!products.length) {
@@ -917,7 +976,7 @@ exports.updateProductCommissions = async (req, res) => {
        FROM product_referral_rules
        WHERE tenant_id = ? AND product_id = ?
        ORDER BY level ASC`,
-      [TENANT_ID, productId]
+      [TENANT_ID, productId],
     );
 
     // Preserve existing rows, including buyer discounts.
@@ -926,7 +985,7 @@ exports.updateProductCommissions = async (req, res) => {
       `UPDATE product_referral_rules
        SET is_active = 0
        WHERE tenant_id = ? AND product_id = ?`,
-      [TENANT_ID, productId]
+      [TENANT_ID, productId],
     );
 
     for (let i = 0; i < rates.length; i++) {
@@ -938,12 +997,7 @@ exports.updateProductCommissions = async (req, res) => {
          ON DUPLICATE KEY UPDATE
            commission_percent = VALUES(commission_percent),
            is_active = 1`,
-        [
-          TENANT_ID,
-          productId,
-          i + 1,
-          (rates[i] / 100).toFixed(2)
-        ]
+        [TENANT_ID, productId, i + 1, (rates[i] / 100).toFixed(2)],
       );
     }
 
@@ -963,11 +1017,11 @@ exports.updateProductCommissions = async (req, res) => {
         JSON.stringify({
           levels: levels.map((rule, i) => ({
             level: i + 1,
-            commission_percent: rates[i] / 100
+            commission_percent: rates[i] / 100,
           })),
-          total_percent: totalBasisPoints / 100
-        })
-      ]
+          total_percent: totalBasisPoints / 100,
+        }),
+      ],
     );
 
     await connection.commit();
@@ -976,7 +1030,7 @@ exports.updateProductCommissions = async (req, res) => {
       message: "Commission settings saved successfully",
       product_id: productId,
       active_levels: rates.length,
-      total_percent: totalBasisPoints / 100
+      total_percent: totalBasisPoints / 100,
     });
   } catch (error) {
     if (connection) {
@@ -990,7 +1044,7 @@ exports.updateProductCommissions = async (req, res) => {
     console.error("UPDATE_PRODUCT_COMMISSIONS_ERROR", error);
 
     return res.status(500).json({
-      message: "Unable to update commission settings"
+      message: "Unable to update commission settings",
     });
   } finally {
     if (connection) connection.release();
