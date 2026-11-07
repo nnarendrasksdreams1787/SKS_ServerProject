@@ -80,15 +80,30 @@ const fs = require("node:fs/promises");
 const path = require("node:path");
 const crypto = require("node:crypto");
 
+// const PRIVATE_EBOOK_DIR = path.resolve(
+//   process.env.EBOOK_STORAGE_DIR ||
+//     path.join(__dirname, "..", "storage", "ebooks")
+// );
+
+// const PRIVATE_DOCX_DIR = path.resolve(
+//   process.env.DOCX_STORAGE_DIR ||
+//     path.join(__dirname, "..", "storage", "docx")
+// );
+
+
+
 const PRIVATE_EBOOK_DIR = path.resolve(
   process.env.EBOOK_STORAGE_DIR ||
-    path.join(__dirname, "..", "storage", "ebooks")
+    path.join(__dirname, "..", "Storage", "ebooks")
 );
 
 const PRIVATE_DOCX_DIR = path.resolve(
   process.env.DOCX_STORAGE_DIR ||
-    path.join(__dirname, "..", "storage", "docx")
+    path.join(__dirname, "..", "Storage", "docx")
 );
+
+
+
 
 function validStorageKey(key, extension) {
   return (
