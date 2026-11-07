@@ -112,7 +112,7 @@ exports.logout = (req, res) => {
     res.clearCookie("sks_admin.sid", {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
+      sameSite: "none",
       path: "/",
     });
 
