@@ -1,5 +1,8 @@
 const bookAccessService = require("../Services/bookAccessService");
 
+const pool = require("../DB/db");
+const { createBookPreview } = require("../Services/ebookPreviewService");
+
 async function checkAccess(req, res) {
   try {
     const result = await bookAccessService.checkBookAccess({
@@ -38,6 +41,61 @@ async function myBooks(req, res) {
     return res.status(500).json({
       success: false,
       message: "Unable to retrieve purchased books",
+    });
+  }
+}
+
+
+async function previewBook(req, res) {
+  try {
+    const productId = Number(req.params.id);
+
+    if (!Number.isSafeInteger(productId) || productId <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid product ID",
+      });
+    }
+
+    const [rows] = await pool.execute(
+      `SELECT ebook_storage_key
+       FROM products
+       WHERE tenant_id = ?
+         AND product_id = ?
+         AND is_active = 1
+       LIMIT 1`,
+      [1, productId]
+    );
+
+    if (!rows.length || !rows[0].ebook_storage_key) {
+      return res.status(404).json({
+        success: false,
+        message: "Book preview is not available",
+      });
+    }
+
+    const preview = await createBookPreview(
+      rows[0].ebook_storage_key
+    );
+
+    res.set({
+      "Content-Type": "application/pdf",
+      "Content-Length": preview.buffer.length,
+      "Content-Disposition": "inline",
+      "Cache-Control": "public, max-age=300",
+      "X-Preview-Pages": String(preview.previewPages),
+      "X-Total-Pages": String(preview.totalPages),
+      "X-Has-More-Pages": String(preview.hasMorePages),
+      "X-Content-Type-Options": "nosniff",
+    });
+
+    return res.status(200).send(preview.buffer);
+  } catch (error) {
+    console.error("Public book preview error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Unable to load book preview",
     });
   }
 }
@@ -261,4 +319,5 @@ module.exports = {
   myBooks,
   streamPurchasedPdf,
   streamPurchasedDocx,
+  previewBook,
 };
