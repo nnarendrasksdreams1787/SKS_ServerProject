@@ -9,14 +9,14 @@ const {
   generateKanhaSpeech,
 } = require("../Services/elevenLabsService");
 
-const router = express.Router();
+const chantTTSRoutes = express.Router();
 
 // Protect all Chant TTS endpoints
-router.use(requireUser);
+chantTTSRoutes.use(requireUser);
 
 // Temporary endpoint to verify authentication
 // No ElevenLabs credits are consumed here.
-router.get("/health", (req, res) => {
+chantTTSRoutes.get("/health", (req, res) => {
   return res.status(200).json({
     success: true,
     message: "Kanha TTS route authenticated successfully",
@@ -30,7 +30,7 @@ const {
   checkElevenLabsConnection,
 } = require("../Services/elevenLabsService");
 
-router.get("/test-voice", async (req, res) => {
+chantTTSRoutes.get("/test-voice", async (req, res) => {
   try {
     const result = await checkElevenLabsConnection();
 
@@ -55,7 +55,7 @@ const CACHE_DIR = path.join(__dirname, "../Cache/chant-audio");
 // Temporary protection against duplicate concurrent generation.
 const pendingGenerations = new Map();
 
-router.post("/speak", async (req, res) => {
+chantTTSRoutes.post("/speak", async (req, res) => {
   try {
     const text = req.body?.text;
 
@@ -164,4 +164,4 @@ if (!selectedVoiceId) {
   }
 });
 
-module.exports = router;
+module.exports = chantTTSRoutes;
