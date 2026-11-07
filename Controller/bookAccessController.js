@@ -2,6 +2,9 @@ const bookAccessService = require("../Services/bookAccessService");
 
 const pool = require("../DB/db");
 const { createBookPreview } = require("../Services/ebookPreviewService");
+const {
+  extractPreviewDocxPage,
+} = require("../Services/ebookPreviewTextService");
 
 async function checkAccess(req, res) {
   try {
@@ -314,10 +317,66 @@ async function streamPurchasedDocx(req, res) {
   }
 }
 
+async function previewBookText(req, res) {
+  try {
+    const productId = Number(req.params.id);
+    const { pageNumber, ocrText } = req.body || {};
+
+    if (
+      !Number.isSafeInteger(productId) ||
+      productId <= 0 ||
+      !Number.isInteger(pageNumber) ||
+      pageNumber < 1 ||
+      pageNumber > 8
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid preview request.",
+      });
+    }
+
+    const [rows] = await pool.execute(
+      `SELECT docx_storage_key
+       FROM products
+       WHERE tenant_id = ?
+         AND product_id = ?
+         AND is_active = 1
+       LIMIT 1`,
+      [1, productId]
+    );
+
+    if (!rows.length || !rows[0].docx_storage_key) {
+      return res.status(404).json({
+        success: false,
+        message: "Preview text is unavailable.",
+      });
+    }
+
+    const result = await extractPreviewDocxPage({
+      storageKey: rows[0].docx_storage_key,
+      pageNumber,
+      ocrText,
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: result,
+    });
+  } catch (error) {
+    console.error("Preview text error:", error);
+
+    return res.status(422).json({
+      success: false,
+      message: error.message || "Unable to prepare preview text.",
+    });
+  }
+}
+
 module.exports = {
   checkAccess,
   myBooks,
   streamPurchasedPdf,
   streamPurchasedDocx,
   previewBook,
+  previewBookText,
 };

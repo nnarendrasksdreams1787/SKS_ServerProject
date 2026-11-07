@@ -23,7 +23,7 @@ const {
 } = require("./Services/phonepeWebhookWorker");
 const settleRoutes = require("./Routing/SettlementRoutes");
 const bookAccRoutes = require("./Routing/BookAccessRoutes");
-const { previewBook } = require("./Controller/bookAccessController");
+const { previewBook, previewBookText } = require("./Controller/bookAccessController");
 
 if (!process.env.SESSION_SECRET) {
   throw new Error("SESSION_SECRET is required");
@@ -215,6 +215,10 @@ END AS hasDocx
 // Public book preview - first 5 pages only
 app.get("/api/products/:id/preview", previewBook);
 
+app.post(
+  "/api/products/:id/preview-text",
+  previewBookText
+);
 
 // Public single product details - no authentication required
 app.get("/api/products/:id", async (req, res) => {
