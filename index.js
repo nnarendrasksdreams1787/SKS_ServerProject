@@ -19,6 +19,11 @@ const paymentRoutes = require("./Routing/PaymentRoutes");
 const isProduction = process.env.NODE_ENV == "production";
 
 const {
+  resolveProductImagePath,
+  getProductImageContentType,
+} = require("./Services/productImageStorage");
+
+const {
   startPhonePeWebhookWorker,
 } = require("./Services/phonepeWebhookWorker");
 const settleRoutes = require("./Routing/SettlementRoutes");
@@ -129,6 +134,40 @@ app.use(express.urlencoded({ extended: true }));
 
 app.get("/", (req, res) => {
   res.send("SKS Dream API is running");
+});
+
+
+// Public product cover image
+app.get("/api/product-images/:key", (req, res) => {
+  try {
+    const storageKey = req.params.key;
+
+    const imagePath = resolveProductImagePath(storageKey);
+
+    res.setHeader(
+      "Content-Type",
+      getProductImageContentType(storageKey)
+    );
+
+    res.setHeader(
+      "Cache-Control",
+      "public, max-age=86400"
+    );
+
+    return res.sendFile(imagePath, (error) => {
+      if (error && !res.headersSent) {
+        return res.status(404).json({
+          message: "Product image not found",
+        });
+      }
+    });
+  } catch (error) {
+    console.error("Product image error:", error.message);
+
+    return res.status(404).json({
+      message: "Product image not found",
+    });
+  }
 });
 
 app.use("/api/auth", authRoute);
