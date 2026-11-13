@@ -1,4 +1,3 @@
-
 const pool = require("../DB/db");
 
 const TENANT_ID = 1;
@@ -25,12 +24,7 @@ function parsePagination(query) {
 // GET /api/admin/bank-details
 exports.getBankDetails = async (req, res) => {
   try {
-    const {
-      search = "",
-      status = "",
-      page = "1",
-      limit = "20",
-    } = req.query;
+    const { search = "", status = "", page = "1", limit = "20" } = req.query;
 
     const pagination = parsePagination({ page, limit });
 
@@ -46,10 +40,7 @@ exports.getBankDetails = async (req, res) => {
       });
     }
 
-    const conditions = [
-      "ba.tenant_id = ?",
-      "u.tenant_id = ba.tenant_id",
-    ];
+    const conditions = ["ba.tenant_id = ?", "u.tenant_id = ba.tenant_id"];
 
     const values = [TENANT_ID];
 
@@ -62,11 +53,27 @@ exports.getBankDetails = async (req, res) => {
     if (String(search).trim()) {
       const term = `%${String(search).trim()}%`;
 
+      // conditions.push(`(
+      //   u.full_name LIKE ?
+      //   OR u.email LIKE ?
+      //   OR u.mobile LIKE ?
+      //   OR u.referral_code LIKE ?
+      //   OR ba.bank_name LIKE ?
+      //   OR ba.account_holder LIKE ?
+      //   OR ba.ifsc_code LIKE ?
+      //   OR ba.account_last4 LIKE ?
+      //   OR CAST(ba.bank_account_id AS CHAR) LIKE ?
+      // )`);
+
+      // values.push(
+      //   term, term, term, term, term,
+      //   term, term, term, term
+      // );
+
       conditions.push(`(
         u.full_name LIKE ?
-        OR u.email LIKE ?
         OR u.mobile LIKE ?
-        OR u.referral_code LIKE ?
+        OR u.reference_id LIKE ?
         OR ba.bank_name LIKE ?
         OR ba.account_holder LIKE ?
         OR ba.ifsc_code LIKE ?
@@ -74,10 +81,7 @@ exports.getBankDetails = async (req, res) => {
         OR CAST(ba.bank_account_id AS CHAR) LIKE ?
       )`);
 
-      values.push(
-        term, term, term, term, term,
-        term, term, term, term
-      );
+      values.push(term, term, term, term, term, term, term, term);
     }
 
     const whereClause = conditions.join(" AND ");
@@ -89,33 +93,59 @@ exports.getBankDetails = async (req, res) => {
          ON u.user_id = ba.user_id
         AND u.tenant_id = ba.tenant_id
        WHERE ${whereClause}`,
-      values
+      values,
     );
+
+    // const [rows] = await pool.execute(
+    //   `SELECT
+    //      ba.bank_account_id,
+    //      ba.user_id,
+    //      u.full_name,
+    //      u.email,
+    //      u.mobile,
+    //      u.referral_code,
+    //      ba.account_holder,
+    //      ba.bank_name,
+    //      ba.account_last4,
+    //      ba.ifsc_code,
+    //      ba.upi_id,
+    //      ba.is_verified,
+    //      ba.is_primary,
+    //      ba.created_at
+    //    FROM bank_accounts ba
+    //    INNER JOIN users u
+    //      ON u.user_id = ba.user_id
+    //     AND u.tenant_id = ba.tenant_id
+    //    WHERE ${whereClause}
+    //    ORDER BY ba.created_at DESC, ba.bank_account_id DESC
+    //    LIMIT ? OFFSET ?`,
+    //   [...values, pagination.limit, pagination.offset],
+    // );
 
     const [rows] = await pool.execute(
       `SELECT
-         ba.bank_account_id,
-         ba.user_id,
-         u.full_name,
-         u.email,
-         u.mobile,
-         u.referral_code,
-         ba.account_holder,
-         ba.bank_name,
-         ba.account_last4,
-         ba.ifsc_code,
-         ba.upi_id,
-         ba.is_verified,
-         ba.is_primary,
-         ba.created_at
-       FROM bank_accounts ba
-       INNER JOIN users u
-         ON u.user_id = ba.user_id
+        ba.bank_account_id,
+        ba.user_id,
+        u.full_name,
+        NULL AS email,
+        u.mobile,
+        u.reference_id AS referral_code,
+        ba.account_holder,
+        ba.bank_name,
+        ba.account_last4,
+        ba.ifsc_code,
+        ba.upi_id,
+        ba.is_verified,
+        ba.is_primary,
+        ba.created_at
+      FROM bank_accounts ba
+      INNER JOIN users u
+        ON u.user_id = ba.user_id
         AND u.tenant_id = ba.tenant_id
-       WHERE ${whereClause}
-       ORDER BY ba.created_at DESC, ba.bank_account_id DESC
-       LIMIT ? OFFSET ?`,
-      [...values, pagination.limit, pagination.offset]
+      WHERE ${whereClause}
+      ORDER BY ba.created_at DESC, ba.bank_account_id DESC
+      LIMIT ? OFFSET ?`,
+      [...values, pagination.limit, pagination.offset],
     );
 
     const total = Number(countRows[0].total);
@@ -151,10 +181,7 @@ exports.updateBankVerification = async (req, res) => {
     const bankAccountId = Number(req.params.id);
     const { is_verified } = req.body;
 
-    if (
-      !Number.isSafeInteger(bankAccountId) ||
-      bankAccountId < 1
-    ) {
+    if (!Number.isSafeInteger(bankAccountId) || bankAccountId < 1) {
       return res.status(400).json({
         message: "Invalid bank account ID.",
       });
@@ -171,7 +198,7 @@ exports.updateBankVerification = async (req, res) => {
        SET is_verified = ?
        WHERE tenant_id = ?
          AND bank_account_id = ?`,
-      [is_verified ? 1 : 0, TENANT_ID, bankAccountId]
+      [is_verified ? 1 : 0, TENANT_ID, bankAccountId],
     );
 
     if (result.affectedRows === 0) {
@@ -181,7 +208,7 @@ exports.updateBankVerification = async (req, res) => {
          WHERE tenant_id = ?
            AND bank_account_id = ?
          LIMIT 1`,
-        [TENANT_ID, bankAccountId]
+        [TENANT_ID, bankAccountId],
       );
 
       if (rows.length === 0) {
