@@ -441,6 +441,7 @@ exports.getBusinessWallet = async (req, res) => {
         totalCommissions: Number(commissionRows[0].totalCommissions),
         totalWithdrawals: Number(withdrawalRows[0].totalWithdrawals),
       },
+      transactions,
     });
   } catch (error) {
     console.error("Admin business wallet error:", error);
