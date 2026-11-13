@@ -1,4 +1,3 @@
-
 const pool = require("../DB/db");
 
 const TENANT_ID = 1;
@@ -19,8 +18,7 @@ function isValidDate(value) {
   const date = new Date(`${value}T00:00:00.000Z`);
 
   return (
-    !Number.isNaN(date.getTime()) &&
-    date.toISOString().slice(0, 10) === value
+    !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value
   );
 }
 
@@ -81,10 +79,16 @@ exports.getReferrals = async (req, res) => {
     if (search.trim()) {
       const term = `%${search.trim()}%`;
 
+      // conditions.push(
+      //   "(u.full_name LIKE ? OR u.email LIKE ? OR " +
+      //   "u.mobile LIKE ? OR u.referral_code LIKE ?)"
+      // );
+
       conditions.push(
-        "(u.full_name LIKE ? OR u.email LIKE ? OR " +
-        "u.mobile LIKE ? OR u.referral_code LIKE ?)"
+        "(u.full_name LIKE ? OR u.mobile LIKE ? OR u.reference_id LIKE ?)",
       );
+
+      params.push(term, term, term);
 
       params.push(term, term, term, term);
     }
@@ -111,35 +115,63 @@ exports.getReferrals = async (req, res) => {
       `SELECT COUNT(*) AS total
        FROM users u
        WHERE ${whereClause}`,
-      params
+      params,
     );
+
+    // const [members] = await pool.execute(
+    //   `SELECT
+    //      u.user_id,
+    //      u.full_name,
+    //      u.email,
+    //      u.mobile,
+    //      u.referral_code,
+    //      u.sponsor_id,
+    //      u.status,
+    //      u.created_at,
+    //      sponsor.full_name AS sponsor_name,
+    //      sponsor.referral_code AS sponsor_referral_code,
+    //      (
+    //        SELECT COUNT(*)
+    //        FROM users child
+    //        WHERE child.tenant_id = u.tenant_id
+    //          AND child.sponsor_id = u.user_id
+    //      ) AS direct_referrals
+    //    FROM users u
+    //    LEFT JOIN users sponsor
+    //      ON sponsor.user_id = u.sponsor_id
+    //     AND sponsor.tenant_id = u.tenant_id
+    //    WHERE ${whereClause}
+    //    ORDER BY u.created_at DESC, u.user_id DESC
+    //    LIMIT ${pageSize} OFFSET ${offset}`,
+    //   params,
+    // );
 
     const [members] = await pool.execute(
       `SELECT
-         u.user_id,
-         u.full_name,
-         u.email,
-         u.mobile,
-         u.referral_code,
-         u.sponsor_id,
-         u.status,
-         u.created_at,
-         sponsor.full_name AS sponsor_name,
-         sponsor.referral_code AS sponsor_referral_code,
-         (
-           SELECT COUNT(*)
-           FROM users child
-           WHERE child.tenant_id = u.tenant_id
-             AND child.sponsor_id = u.user_id
-         ) AS direct_referrals
-       FROM users u
-       LEFT JOIN users sponsor
-         ON sponsor.user_id = u.sponsor_id
-        AND sponsor.tenant_id = u.tenant_id
-       WHERE ${whereClause}
-       ORDER BY u.created_at DESC, u.user_id DESC
-       LIMIT ${pageSize} OFFSET ${offset}`,
-      params
+     u.user_id,
+     u.full_name,
+     NULL AS email,
+     u.mobile,
+     u.reference_id AS referral_code,
+     u.sponsor_id,
+     u.status,
+     u.created_at,
+     sponsor.full_name AS sponsor_name,
+     sponsor.reference_id AS sponsor_referral_code,
+     (
+       SELECT COUNT(*)
+       FROM users child
+       WHERE child.tenant_id = u.tenant_id
+         AND child.sponsor_id = u.user_id
+     ) AS direct_referrals
+   FROM users u
+   LEFT JOIN users sponsor
+     ON sponsor.user_id = u.sponsor_id
+    AND sponsor.tenant_id = u.tenant_id
+   WHERE ${whereClause}
+   ORDER BY u.created_at DESC, u.user_id DESC
+   LIMIT ${pageSize} OFFSET ${offset}`,
+      params,
     );
 
     return res.json({
@@ -148,9 +180,7 @@ exports.getReferrals = async (req, res) => {
         page: pageNumber,
         limit: pageSize,
         total: Number(countRows[0].total),
-        totalPages: Math.ceil(
-          Number(countRows[0].total) / pageSize
-        ),
+        totalPages: Math.ceil(Number(countRows[0].total) / pageSize),
       },
     });
   } catch (error) {
@@ -181,14 +211,14 @@ exports.getReferralTree = async (req, res) => {
       `SELECT
          user_id,
          full_name,
-         referral_code,
+         reference_id AS referral_code,
          sponsor_id,
          status,
          created_at
        FROM users
        WHERE tenant_id = ? AND user_id = ?
        LIMIT 1`,
-      [TENANT_ID, userId]
+      [TENANT_ID, userId],
     );
 
     if (!members.length) {
@@ -202,7 +232,7 @@ exports.getReferralTree = async (req, res) => {
          rp.level,
          u.user_id,
          u.full_name,
-         u.referral_code,
+         u.reference_id AS referral_code,
          u.sponsor_id,
          u.status
        FROM referral_paths rp
@@ -212,7 +242,7 @@ exports.getReferralTree = async (req, res) => {
        WHERE rp.tenant_id = ?
          AND rp.descendant_id = ?
        ORDER BY rp.level ASC`,
-      [TENANT_ID, userId]
+      [TENANT_ID, userId],
     );
 
     const [descendants] = await pool.execute(
@@ -220,7 +250,7 @@ exports.getReferralTree = async (req, res) => {
          rp.level,
          u.user_id,
          u.full_name,
-         u.referral_code,
+         u.reference_id AS referral_code,
          u.sponsor_id,
          u.status,
          u.created_at
@@ -231,7 +261,7 @@ exports.getReferralTree = async (req, res) => {
        WHERE rp.tenant_id = ?
          AND rp.ancestor_id = ?
        ORDER BY rp.level ASC, u.created_at DESC`,
-      [TENANT_ID, userId]
+      [TENANT_ID, userId],
     );
 
     return res.json({
@@ -262,10 +292,7 @@ exports.createReferral = async (req, res) => {
     const notes = String(req.body.notes || "").trim();
     const status = req.body.status || "not_registered";
 
-    if (
-      !Number.isSafeInteger(sponsorUserId) ||
-      sponsorUserId <= 0
-    ) {
+    if (!Number.isSafeInteger(sponsorUserId) || sponsorUserId <= 0) {
       return res.status(400).json({
         message: "A valid sponsor user ID is required",
       });
@@ -305,7 +332,7 @@ exports.createReferral = async (req, res) => {
        FROM users
        WHERE user_id = ? AND tenant_id = ?
        LIMIT 1`,
-      [sponsorUserId, TENANT_ID]
+      [sponsorUserId, TENANT_ID],
     );
 
     if (!sponsors.length) {
@@ -336,7 +363,7 @@ exports.createReferral = async (req, res) => {
         status,
         notes || null,
         req.session?.adminId || null,
-      ]
+      ],
     );
 
     return res.status(201).json({
