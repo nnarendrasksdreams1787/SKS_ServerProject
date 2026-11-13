@@ -118,6 +118,10 @@ async function createPayment({ orderReference, amountPaise, customer }) {
     body: JSON.stringify({
       amount: (amountPaise / 100).toFixed(2),
       mobileno: customer.mobile,
+      email_id:
+        config.environment === "test"
+          ? "mswipe-uat@example.com"
+          : customer.email,
       custcode: config.custCode,
       user_id: config.userId,
       sessiontoken: token,
