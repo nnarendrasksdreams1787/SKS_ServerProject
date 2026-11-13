@@ -32,6 +32,7 @@ const { getNetwork } = require("../Controller/adminNetworkController");
 const {
   getWallets,
   getWalletTransactions,
+  getBusinessWallet,
 } = require("../Controller/adminWalletController");
 const {
   getWithdrawals,
@@ -94,6 +95,7 @@ adminRoute.get("/network", requireAdmin, getNetwork);
 
 adminRoute.get("/wallets", requireAdmin, getWallets);
 adminRoute.get("/wallet-transactions", requireAdmin, getWalletTransactions);
+adminRoute.get("/my-wallet", requireAdmin, getBusinessWallet);
 
 adminRoute.get("/withdrawals", requireAdmin, getWithdrawals);
 adminRoute.get("/payout-batches", requireAdmin, getPayoutBatches);
