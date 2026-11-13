@@ -317,9 +317,6 @@ exports.getWalletTransactions = async (req, res) => {
   }
 };
 
-
-
-
 // GET /api/admin/my-wallet
 exports.getBusinessWallet = async (req, res) => {
   try {
@@ -362,6 +359,75 @@ exports.getBusinessWallet = async (req, res) => {
        FROM withdrawal_requests
        WHERE tenant_id = ?
          AND status = 'paid'`,
+      [TENANT_ID],
+    );
+
+    // 5. Business payment transaction history
+    const [transactions] = await pool.execute(
+      `SELECT
+     p.payment_id AS txn_id,
+     p.order_id,
+     o.order_number,
+     p.gateway,
+     p.gateway_txn_id,
+     p.method,
+     p.amount,
+     p.currency,
+     p.status,
+     p.paid_at,
+     p.created_at,
+
+     GROUP_CONCAT(
+       DISTINCT oi.product_title_snapshot
+       ORDER BY oi.product_title_snapshot
+       SEPARATOR ', '
+     ) AS product_names,
+
+     CASE
+       WHEN p.status = 'success' THEN 'Credit'
+       ELSE p.status
+     END AS event_type,
+
+     CONCAT(
+       'Order #',
+       o.order_number,
+       ' · ',
+       COALESCE(
+         GROUP_CONCAT(
+           DISTINCT oi.product_title_snapshot
+           SEPARATOR ', '
+         ),
+         'Order payment'
+       )
+     ) AS description
+
+   FROM payments p
+
+   INNER JOIN orders o
+     ON o.order_id = p.order_id
+    AND o.tenant_id = p.tenant_id
+
+   LEFT JOIN order_items oi
+     ON oi.order_id = o.order_id
+    AND oi.tenant_id = o.tenant_id
+
+   WHERE p.tenant_id = ?
+
+   GROUP BY
+     p.payment_id,
+     p.order_id,
+     o.order_number,
+     p.gateway,
+     p.gateway_txn_id,
+     p.method,
+     p.amount,
+     p.currency,
+     p.status,
+     p.paid_at,
+     p.created_at
+
+   ORDER BY p.created_at DESC, p.payment_id DESC
+   LIMIT 100`,
       [TENANT_ID],
     );
 
