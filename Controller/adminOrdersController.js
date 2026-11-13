@@ -1,4 +1,3 @@
-
 const pool = require("../DB/db");
 
 const TENANT_ID = 1;
@@ -81,15 +80,24 @@ exports.getOrders = async (req, res) => {
     if (String(search).trim()) {
       const term = `%${String(search).trim()}%`;
 
+      // conditions.push(`(
+      //   o.order_number LIKE ?
+      //   OR u.full_name LIKE ?
+      //   OR u.email LIKE ?
+      //   OR u.mobile LIKE ?
+      //   OR u.referral_code LIKE ?
+      // )`);
+
+      // values.push(term, term, term, term, term);
+
       conditions.push(`(
         o.order_number LIKE ?
         OR u.full_name LIKE ?
-        OR u.email LIKE ?
         OR u.mobile LIKE ?
-        OR u.referral_code LIKE ?
+        OR u.reference_id LIKE ?
       )`);
 
-      values.push(term, term, term, term, term);
+      values.push(term, term, term, term);
     }
 
     if (fromDate) {
@@ -111,7 +119,7 @@ exports.getOrders = async (req, res) => {
          ON u.user_id = o.user_id
         AND u.tenant_id = o.tenant_id
        WHERE ${whereClause}`,
-      values
+      values,
     );
 
     const [orders] = await pool.execute(
@@ -120,9 +128,9 @@ exports.getOrders = async (req, res) => {
          o.order_number,
          o.user_id,
          u.full_name,
-         u.email,
+         NULL AS email,
          u.mobile,
-         u.referral_code,
+         u.reference_id AS referral_code,
          o.referrer_id,
          referrer.full_name AS referrer_name,
          o.subtotal,
@@ -158,7 +166,7 @@ exports.getOrders = async (req, res) => {
        WHERE ${whereClause}
        ORDER BY o.created_at DESC, o.order_id DESC
        LIMIT ? OFFSET ?`,
-      [...values, pagination.limit, pagination.offset]
+      [...values, pagination.limit, pagination.offset],
     );
 
     const total = Number(countRows[0].total);
@@ -198,9 +206,9 @@ exports.getOrderDetails = async (req, res) => {
          o.order_number,
          o.user_id,
          u.full_name,
-         u.email,
+         NULL AS email,
          u.mobile,
-         u.referral_code,
+         u.reference_id AS referral_code,
          o.referrer_id,
          referrer.full_name AS referrer_name,
          o.subtotal,
@@ -222,7 +230,7 @@ exports.getOrderDetails = async (req, res) => {
        WHERE o.tenant_id = ?
          AND o.order_id = ?
        LIMIT 1`,
-      [TENANT_ID, orderId]
+      [TENANT_ID, orderId],
     );
 
     if (!orders.length) {
@@ -247,7 +255,7 @@ exports.getOrderDetails = async (req, res) => {
        WHERE oi.tenant_id = ?
          AND oi.order_id = ?
        ORDER BY oi.order_item_id ASC`,
-      [TENANT_ID, orderId]
+      [TENANT_ID, orderId],
     );
 
     const [payments] = await pool.execute(
@@ -266,7 +274,7 @@ exports.getOrderDetails = async (req, res) => {
        WHERE tenant_id = ?
          AND order_id = ?
        ORDER BY created_at DESC, payment_id DESC`,
-      [TENANT_ID, orderId]
+      [TENANT_ID, orderId],
     );
 
     const [refunds] = await pool.execute(
@@ -285,7 +293,7 @@ exports.getOrderDetails = async (req, res) => {
        WHERE tenant_id = ?
          AND order_id = ?
        ORDER BY requested_at DESC, refund_id DESC`,
-      [TENANT_ID, orderId]
+      [TENANT_ID, orderId],
     );
 
     return res.json({
