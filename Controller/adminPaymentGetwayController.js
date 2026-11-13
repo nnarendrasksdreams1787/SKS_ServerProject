@@ -18,7 +18,7 @@ exports.getPaymentGateways = async (req, res) => {
     const [providers] = await pool.execute(
       `SELECT
           p.provider_id,
-          p.provider_code,
+          p.provider_code, 
           p.provider_name,
           p.status AS provider_status,
           p.is_default,

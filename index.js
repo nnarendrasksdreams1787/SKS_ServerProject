@@ -187,26 +187,6 @@ app.get("/api/products", async (req, res) => {
   try {
     const pool = require("./DB/db");
 
-    // const [rows] = await pool.execute(
-    //   `SELECT
-    //      p.product_id AS id,
-    //      p.title AS name,
-    //      p.slug,
-    //      p.description,
-    //      p.author,
-    //      c.name AS category,
-    //      p.price,
-    //      p.cover_image_key
-    //    FROM products p
-    //    INNER JOIN categories c
-    //      ON c.category_id = p.category_id
-    //     AND c.tenant_id = p.tenant_id
-    //    WHERE p.tenant_id = ?
-    //      AND p.is_active = 1
-    //    ORDER BY p.created_at DESC`,
-    //   [1],
-    // );
-
     const [rows] = await pool.execute(
       `SELECT
      p.product_id AS id,
