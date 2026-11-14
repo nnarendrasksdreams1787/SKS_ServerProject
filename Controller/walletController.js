@@ -37,27 +37,28 @@ const getMyWallet = async (req, res) => {
     if (walletRows.length === 0) {
       await pool.query(
         `INSERT IGNORE INTO wallets (
-       tenant_id,
-       user_id,
-       available_balance,
-       reserved_balance
-     ) VALUES (?, ?, 0.00, 0.00)`,
-        [userId, tenantId],
-      );
-
-      const [createdWallet] = await pool.query(
-        `SELECT wallet_id, available_balance, reserved_balance
-     FROM wallets
-     WHERE tenant_id = ? AND user_id = ?
-     LIMIT 1`,
+      tenant_id,
+      user_id,
+      available_balance,
+      reserved_balance
+    ) VALUES (?, ?, 0.00, 0.00)`,
         [tenantId, userId],
       );
 
-      if (createdWallet.length === 0) {
-        throw new Error("Unable to initialize user wallet");
+      const [newWalletRows] = await pool.query(
+        `SELECT wallet_id, available_balance, reserved_balance
+     FROM wallets
+     WHERE user_id = ?
+       AND tenant_id = ?
+     LIMIT 1`,
+        [userId, tenantId],
+      );
+
+      if (newWalletRows.length === 0) {
+        throw new Error("Wallet initialization failed");
       }
 
-      walletRows.push(createdWallet[0]);
+      walletRows.push(newWalletRows[0]);
     }
 
     const wallet = walletRows[0];
