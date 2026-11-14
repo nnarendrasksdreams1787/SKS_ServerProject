@@ -13,7 +13,9 @@ function validateBankDetails(data) {
   const accountHolder = String(data.account_holder || "").trim();
   const bankName = String(data.bank_name || "").trim();
   const accountNumber = String(data.account_number || "").trim();
-  const ifscCode = String(data.ifsc_code || "").trim().toUpperCase();
+  const ifscCode = String(data.ifsc_code || "")
+    .trim()
+    .toUpperCase();
   const upiId = String(data.upi_id || "").trim();
   const branch = String(data.branch || "").trim();
   const accountType = String(data.account_type || "").trim();
@@ -87,7 +89,7 @@ const getBankAccounts = async (req, res) => {
        WHERE tenant_id = ?
          AND user_id = ?
        ORDER BY is_primary DESC, created_at DESC`,
-      [tenantId, userId]
+      [tenantId, userId],
     );
 
     return res.status(200).json({
@@ -143,6 +145,17 @@ const addBankAccount = async (req, res) => {
     const fingerprint = fingerprintAccountNumber(accountNumber);
     const last4 = accountNumber.slice(-4);
 
+    const [existingAccounts] = await pool.query(
+      `SELECT bank_account_id
+        FROM bank_accounts
+        WHERE tenant_id = ?
+          AND user_id = ?
+        LIMIT 1`,
+        [tenantId, userId],
+        );
+
+    const isPrimary = existingAccounts.length === 0 ? 1 : 0;
+
     const [result] = await pool.query(
       `INSERT INTO bank_accounts (
          tenant_id,
@@ -158,7 +171,7 @@ const addBankAccount = async (req, res) => {
          account_type,
          is_verified,
          is_primary
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0)`,
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
       [
         tenantId,
         userId,
@@ -171,7 +184,8 @@ const addBankAccount = async (req, res) => {
         upiId,
         branch,
         accountType,
-      ]
+        isPrimary,
+      ],
     );
 
     return res.status(201).json({
@@ -238,7 +252,7 @@ const updateBankAccount = async (req, res) => {
          AND tenant_id = ?
          AND user_id = ?
        FOR UPDATE`,
-      [bankAccountId, tenantId, userId]
+      [bankAccountId, tenantId, userId],
     );
 
     if (accounts.length === 0) {
@@ -259,7 +273,7 @@ const updateBankAccount = async (req, res) => {
          AND bank_account_id = ?
          AND status IN ('pending', 'approved', 'processing')
        LIMIT 1`,
-      [tenantId, userId, bankAccountId]
+      [tenantId, userId, bankAccountId],
     );
 
     if (withdrawals.length > 0) {
@@ -267,8 +281,7 @@ const updateBankAccount = async (req, res) => {
 
       return res.status(409).json({
         success: false,
-        message:
-          "Bank details cannot be edited while a withdrawal is active",
+        message: "Bank details cannot be edited while a withdrawal is active",
       });
     }
 
@@ -304,7 +317,7 @@ const updateBankAccount = async (req, res) => {
         bankAccountId,
         tenantId,
         userId,
-      ]
+      ],
     );
 
     await connection.commit();
@@ -360,7 +373,7 @@ const setPrimaryBankAccount = async (req, res) => {
        WHERE tenant_id = ?
          AND user_id = ?
        FOR UPDATE`,
-      [tenantId, userId]
+      [tenantId, userId],
     );
 
     if (users.length === 0) {
@@ -380,7 +393,7 @@ const setPrimaryBankAccount = async (req, res) => {
          AND tenant_id = ?
          AND user_id = ?
        FOR UPDATE`,
-      [bankAccountId, tenantId, userId]
+      [bankAccountId, tenantId, userId],
     );
 
     if (accounts.length === 0) {
@@ -399,7 +412,7 @@ const setPrimaryBankAccount = async (req, res) => {
        WHERE tenant_id = ?
          AND user_id = ?
          AND is_primary = 1`,
-      [tenantId, userId]
+      [tenantId, userId],
     );
 
     // Set selected bank account as primary.
@@ -409,7 +422,7 @@ const setPrimaryBankAccount = async (req, res) => {
        WHERE bank_account_id = ?
          AND tenant_id = ?
          AND user_id = ?`,
-      [bankAccountId, tenantId, userId]
+      [bankAccountId, tenantId, userId],
     );
 
     await connection.commit();

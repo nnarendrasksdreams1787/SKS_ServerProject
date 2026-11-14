@@ -7,12 +7,47 @@ const path = require("node:path");
 
 const {
   generateKanhaSpeech,
+  checkElevenLabsConnection,
 } = require("../Services/elevenLabsService");
+
+const {checkBookAccess } = require("../Services/bookAccessService")
 
 const chantTTSRoutes = express.Router();
 
 // Protect all Chant TTS endpoints
 chantTTSRoutes.use(requireUser);
+
+
+
+// Only users who own Product ID 1 can use Chant and its TTS APIs.
+chantTTSRoutes.use(async (req, res, next) => {
+  try {
+    const access = await checkBookAccess({
+      userId: req.user.userId,
+      productId: 1,
+    });
+
+    if (!access.hasAccess) {
+      return res.status(403).json({
+        success: false,
+        message: "Please purchase the Chant Digital Book to use this feature.",
+        code: "CHANT_PURCHASE_REQUIRED",
+      });
+    }
+
+    next();
+  } catch (error) {
+    console.error("Chant access verification failed:", error);
+
+    return res.status(error.statusCode || 500).json({
+      success: false,
+      message: "Unable to verify Chant access.",
+    });
+  }
+});
+
+
+
 
 // Temporary endpoint to verify authentication
 // No ElevenLabs credits are consumed here.
@@ -26,9 +61,9 @@ chantTTSRoutes.get("/health", (req, res) => {
   });
 });
 
-const {
-  checkElevenLabsConnection,
-} = require("../Services/elevenLabsService");
+// const {
+//   checkElevenLabsConnection,
+// } = require("../Services/elevenLabsService");
 
 chantTTSRoutes.get("/test-voice", async (req, res) => {
   try {
