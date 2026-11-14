@@ -17,21 +17,47 @@ const getMyWallet = async (req, res) => {
         AND tenant_id = ?
       LIMIT 1
       `,
-      [userId, tenantId]
+      [userId, tenantId],
     );
 
     // New users may not have a wallet row yet.
+    // if (walletRows.length === 0) {
+    //   return res.status(200).json({
+    //     success: true,
+    //     summary: {
+    //       balance: 0,
+    //       totalCredit: 0,
+    //       totalDebit: 0,
+    //       reservedBalance: 0,
+    //     },
+    //     transactions: [],
+    //   });
+    // }
+
     if (walletRows.length === 0) {
-      return res.status(200).json({
-        success: true,
-        summary: {
-          balance: 0,
-          totalCredit: 0,
-          totalDebit: 0,
-          reservedBalance: 0,
-        },
-        transactions: [],
-      });
+      await pool.query(
+        `INSERT IGNORE INTO wallets (
+       tenant_id,
+       user_id,
+       available_balance,
+       reserved_balance
+     ) VALUES (?, ?, 0.00, 0.00)`,
+        [userId, tenantId],
+      );
+
+      const [createdWallet] = await pool.query(
+        `SELECT wallet_id, available_balance, reserved_balance
+     FROM wallets
+     WHERE tenant_id = ? AND user_id = ?
+     LIMIT 1`,
+        [tenantId, userId],
+      );
+
+      if (createdWallet.length === 0) {
+        throw new Error("Unable to initialize user wallet");
+      }
+
+      walletRows.push(createdWallet[0]);
     }
 
     const wallet = walletRows[0];
@@ -54,7 +80,7 @@ const getMyWallet = async (req, res) => {
         AND user_id = ?
         AND tenant_id = ?
       `,
-      [wallet.wallet_id, userId, tenantId]
+      [wallet.wallet_id, userId, tenantId],
     );
 
     // 3. Fetch transaction history
@@ -73,7 +99,7 @@ const getMyWallet = async (req, res) => {
         AND tenant_id = ?
       ORDER BY created_at DESC, txn_id DESC
       `,
-      [wallet.wallet_id, userId, tenantId]
+      [wallet.wallet_id, userId, tenantId],
     );
 
     return res.status(200).json({

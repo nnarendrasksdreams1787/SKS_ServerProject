@@ -14,16 +14,29 @@ const getDashboard = async (req, res) => {
     //    LIMIT 1`,
     //   [userId, tenantId]
     // );
+    // const [users] = await pool.query(
+    //   `SELECT
+    //         user_id,
+    //         reference_id AS login_id,
+    //         full_name,
+    //         reference_id
+    //     FROM users
+    //     WHERE user_id = ?
+    //       AND tenant_id = ?
+    //     LIMIT 1`,
+    //   [userId, tenantId],
+    // );
+
     const [users] = await pool.query(
       `SELECT
-            user_id,
-            reference_id AS login_id,
-            full_name,
-            reference_id
-        FROM users
-        WHERE user_id = ?
-          AND tenant_id = ?
-        LIMIT 1`,
+      user_id,
+      reference_id AS login_id,
+      full_name,
+      reference_id AS referral_code
+   FROM users
+   WHERE user_id = ?
+     AND tenant_id = ?
+   LIMIT 1`,
       [userId, tenantId],
     );
 
@@ -34,8 +47,6 @@ const getDashboard = async (req, res) => {
       });
     }
 
-    
-
     // 2. Available wallet balance
     const [wallets] = await pool.query(
       `SELECT available_balance
@@ -44,6 +55,28 @@ const getDashboard = async (req, res) => {
        LIMIT 1`,
       [userId, tenantId],
     );
+
+    if (wallets.length === 0) {
+      await pool.query(
+        `INSERT IGNORE INTO wallets (
+       tenant_id,
+       user_id,
+       available_balance,
+       reserved_balance
+     ) VALUES (?, ?, 0.00, 0.00)`,
+        [tenantId, userId],
+      );
+
+      const [createdWallet] = await pool.query(
+        `SELECT available_balance
+     FROM wallets
+     WHERE tenant_id = ? AND user_id = ?
+     LIMIT 1`,
+        [tenantId, userId],
+      );
+
+      wallets.push(...createdWallet);
+    }
 
     const totalAmount = wallets.length
       ? Number(wallets[0].available_balance)
