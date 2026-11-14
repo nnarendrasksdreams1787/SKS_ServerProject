@@ -84,11 +84,20 @@ exports.getReferrals = async (req, res) => {
       //   "u.mobile LIKE ? OR u.referral_code LIKE ?)"
       // );
 
+      // conditions.push(
+      //   "(u.full_name LIKE ? OR u.mobile LIKE ? OR u.reference_id LIKE ?)",
+      // );
+
       conditions.push(
-        "(u.full_name LIKE ? OR u.mobile LIKE ? OR u.reference_id LIKE ?)",
+        `(
+          u.full_name LIKE ?
+          OR u.mobile LIKE ?
+          OR u.reference_id LIKE ?
+          OR u.referral_id LIKE ?
+        )`,
       );
 
-      params.push(term, term, term);
+      // params.push(term, term, term);
 
       params.push(term, term, term, term);
     }
